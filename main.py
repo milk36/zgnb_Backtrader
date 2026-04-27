@@ -16,6 +16,9 @@ from config import (
     DEFAULT_END_DATE,
     STOCK_TYPE,
     PLOT_ENABLED,
+    PORTFOLIO_INITIAL_CASH,
+    PORTFOLIO_MAX_POSITIONS,
+    PORTFOLIO_PER_POSITION,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
@@ -39,6 +42,7 @@ def parse_args():
     parser.add_argument("--scan", action="store_true", help="强制全市场扫描（忽略 --symbol）")
     parser.add_argument("--scan-only", action="store_true", help="仅扫描选股，不回测")
     parser.add_argument("--no-plot", action="store_true", help="禁用绘图")
+    parser.add_argument("--portfolio", action="store_true", help="组合级模拟（正确的时间序列模拟）")
     return parser.parse_args()
 
 
@@ -80,6 +84,43 @@ def _run_backtest(symbols, args):
 def main():
     args = parse_args()
     strategy_cls = STRATEGIES[args.strategy]
+
+    # ---- huangbai 策略：组合级模拟 ----
+    if strategy_cls == HuangBaiB1Strategy and args.portfolio:
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.huangbai_b1_strategy import preload_all_signals
+
+        print("=" * 55)
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days = preload_all_signals(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: 组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
+              f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
+              f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PORTFOLIO_INITIAL_CASH,
+            max_positions=PORTFOLIO_MAX_POSITIONS,
+            per_position_cash=PORTFOLIO_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report)
+        return
 
     # ---- huangbai 策略：全市场扫描 + 回测 ----
     if strategy_cls == HuangBaiB1Strategy and (args.scan or args.symbol is None):

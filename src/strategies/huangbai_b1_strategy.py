@@ -733,3 +733,309 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
                   f"缩量={r['shrink_score']:.3f}{tag}")
 
     return results
+
+
+# ================================================================== #
+#  组合级模拟：全量每bar信号计算                                       #
+# ================================================================== #
+
+def _compute_all_bar_signals(C, H, L, O, V, dates, params):
+    """计算每根 bar 的三级过滤信号（向量版本，返回所有 bar 的信号数组）
+
+    基于 HuangBaiB1Strategy.indicators() 的逻辑，直接用 MyTT 批量计算。
+    返回 dict of numpy arrays，或 None（数据不足）。
+    """
+    n = len(C)
+    if n < 300:
+        return None
+
+    LC = REF(C, 1)
+
+    # ---- 核心指标 ----
+    white = EMA(EMA(C, 10), 10)
+    yellow = (MA(C, params["m1"]) + MA(C, params["m2"])
+              + MA(C, params["m3"]) + MA(C, params["m4"])) / 4
+    bbi = (MA(C, 3) + MA(C, 6) + MA(C, 12) + MA(C, 24)) / 4
+
+    rsi = SMA(MAX(C - LC, 0), 3, 1) / SMA(ABS(C - LC), 3, 1) * 100
+
+    # KDJ
+    llv9, hhv9 = LLV(L, 9), HHV(H, 9)
+    denom9 = hhv9 - llv9
+    rsv = np.where(denom9 != 0, (C - llv9) / denom9 * 100, 50.0)
+    K = SMA(rsv, 3, 1)
+    D = SMA(K, 3, 1)
+    J = 3 * K - 2 * D
+
+    # SHORT / LONG
+    s_denom = HHV(C, params["n1"]) - LLV(L, params["n1"])
+    SHORT = np.where(s_denom != 0, 100 * (C - LLV(L, params["n1"])) / s_denom, 50.0)
+    l_denom = HHV(C, params["n2"]) - LLV(L, params["n2"])
+    LONG = np.where(l_denom != 0, 100 * (C - LLV(L, params["n2"])) / l_denom, 50.0)
+
+    # ---- 周线多头过滤 ----
+    ma30w = _weekly_ma(C, dates, params["wma30"])
+    ma60w = _weekly_ma(C, dates, params["wma60"])
+    ma120w = _weekly_ma(C, dates, params["wma120"])
+    ma240w = _weekly_ma(C, dates, params["wma240"])
+    valid = (ma30w > 0.01) & (ma60w > 0.01) & (ma120w > 0.01) & (ma240w > 0.01)
+    weekly_bull = valid & (ma30w > ma60w) & (ma60w > ma120w) & (ma120w > ma240w)
+    above_ma30w = C > ma30w
+
+    # ---- 黄白线金叉 ----
+    gc_arr = CROSS(white, yellow)
+    bars_since_gc = BARSLAST(gc_arr)
+    recent_gc = np.asarray(bars_since_gc, dtype=float) <= params["gc_lookback"]
+
+    # ---- 振幅 / 异动 ----
+    is_tech = params["stock_type"] == "tech"
+    pct_change = np.where(LC > 0, C / LC - 1, 0.0)
+    volatile = EXIST(pct_change > 0.15, 200)
+    is_volatile = volatile | is_tech
+    amp_range = np.where(is_volatile, 8.0, 5.0)
+    relax = np.where(is_volatile, 0.9, 1.0)
+
+    daily_amp = (H - L) / L * 100
+    daily_pct = ABS(C - LC) / LC * 100 * relax
+    up_doji = (C > LC) & (ABS(C - O) / O * 100 * relax < 1.8)
+
+    needle_20 = ((SHORT <= 20) & (LONG >= 75)) | ((LONG - SHORT) >= 70)
+    treasure = (COUNT(LONG >= 75, 8) >= 6) & (COUNT(SHORT <= 70, 7) >= 4) & (COUNT(SHORT <= 50, 8) >= 1)
+    dbl_fork = EVERY(LONG >= 75, 8) & (COUNT(SHORT <= 50, 6) >= 2) & (COUNT(SHORT <= 20, 7) >= 1)
+    red_green = (COUNT(C >= O, 15) > 7) | (COUNT(C > REF(C, 1), 11) > 5)
+
+    near_amp = (HHV(H, params["n"]) - LLV(L, params["n"])) / LLV(L, params["n"]) * 100
+    far_amp = (HHV(H, params["m"]) - LLV(L, params["m"])) / LLV(L, params["m"]) * 100
+    near_ano = (near_amp >= 15) | ((HHV(H, 12) - LLV(L, 14)) / LLV(L, 14) * 100 >= 11)
+    far_ano = far_amp >= 30
+    super_ano = near_amp >= 60
+    wash_ano = (COUNT(needle_20, 10) >= 2) | treasure | dbl_fork
+
+    anomaly = near_ano | far_ano | wash_ano
+
+    # ---- 成交量 ----
+    vday = HHVBARS(V, 40)
+    c_vd = _ref_at(C, vday)
+    c_vd1 = _ref_at(C, vday + 1)
+    o_vd = _ref_at(O, vday)
+    not_big_green = np.where(np.isnan(c_vd), True,
+                             (c_vd >= c_vd1) | (c_vd >= o_vd))
+    big_green = ~not_big_green
+    big_green_far = (vday >= 15) & big_green
+    ok_green = not_big_green | big_green_far
+
+    hhv_v20 = HHV(V, 20)
+    hhv_v50 = HHV(V, 50)
+    shrink = (V < hhv_v20 * 0.416) | (V < hhv_v50 / 3)
+    pb_shrink = (V < hhv_v20 * 0.45) | (V < hhv_v50 / 3)
+    mod_shrink = (V < hhv_v20 * 0.618) | (V < hhv_v50 / 3)
+    sup_shrink = (V < HHV(V, 30) / 4) | (V < hhv_v50 / 6)
+
+    shrink_score = np.where(hhv_v20 > 0, V / hhv_v20, 1.0)
+
+    # ---- 趋势状态 ----
+    uptrend = ((white >= yellow * 0.999)
+               & ((C >= yellow) | ((C > yellow * 0.975) & (C > O))))
+
+    strong_trend = (EVERY(yellow >= REF(yellow, 1) * 0.999, 13)
+                    & (white >= REF(white, 1))
+                    & EVERY(white > yellow, 20)
+                    & EVERY(white >= REF(white, 1), 11)
+                    & red_green)
+
+    cross_c_y = CROSS(C, yellow)
+    bars_cross_cy = BARSLAST(cross_c_y)
+    super_bull = ((EVERY(bbi >= REF(bbi, 1) * 0.999, 20)
+                   | (COUNT(bbi >= REF(bbi, 1), 25) >= 23))
+                  & ((near_amp >= 30) | (far_amp > 80))
+                  & (bars_cross_cy > 12))
+
+    # ---- 回踩距离 ----
+    dist_w = ABS(C - white) / C * 100
+    dist_wL = ABS(L - white) / white * 100
+    dist_bbi = ABS(C - bbi) / C * 100
+    dist_bbiL = ABS(L - bbi) / bbi * 100
+    dist_y = ABS(C - yellow) / yellow * 100
+
+    pb_white = ((C >= white) & (dist_w <= 2)) \
+        | ((C < white) & (dist_w < 0.8)) \
+        | ((C >= bbi) & (dist_bbi < 2.5) & (dist_bbiL < 1)
+           & (dist_w <= 3) & (daily_pct < 1) & (C > LC))
+
+    white_sup = (C >= white) & (dist_w < 1.5)
+
+    strong_pb_hold = ((dist_wL < 1) | (dist_bbiL < 0.5)) & (C > white) & (dist_w <= 3.5)
+
+    pb_yellow = ((C >= yellow) & ((dist_y <= 1.5) | ((dist_y <= 2) & (daily_pct < 1)))) \
+        | ((C < yellow) & (dist_y <= 0.8))
+
+    # ---- B1 七个子条件（向量版） ----
+    rsi_j = rsi + J
+
+    # 1. 超卖缩量拐头B
+    b_oversold_turn = (uptrend
+                       & (rsi - 15 >= REF(rsi, 1))
+                       & ((REF(rsi, 1) < 20) | (REF(J, 1) < 14))
+                       & (daily_amp < amp_range + 0.5)
+                       & ((daily_pct < 2.3) | (up_doji & (daily_pct < 4)))
+                       & ok_green & anomaly & (C >= yellow))
+
+    # 2. 超卖缩量B
+    b_oversold_shrink = (uptrend
+                         & ((J < 14) | (rsi < 23))
+                         & ((rsi_j < 55) | (J == LLV(J, 20)))
+                         & (daily_amp < amp_range)
+                         & ((daily_pct < 2.5) | up_doji)
+                         & ok_green
+                         & (shrink | (mod_shrink & (daily_pct < 1)))
+                         & anomaly)
+
+    # 3. 原始B1
+    b_raw = ((white > yellow)
+             & (C >= yellow * 0.99)
+             & (yellow >= REF(yellow, 1))
+             & ((J < 13) | (rsi < 21))
+             & (rsi_j < LLV(rsi_j, 15) * 1.5)
+             & mod_shrink & ok_green
+             & ((ABS(C - O) * 100 / O < 1.5)
+                | (sup_shrink | (mod_shrink & (V < LLV(V, 20) * 1.1) & (J == LLV(J, 20))))
+                | (mod_shrink & ((dist_w < 1.8) | (dist_bbi < 1.5) | (dist_y < 2.8))))
+             & anomaly)
+
+    # 4. 超卖超缩量B
+    b_oversold_super = (uptrend
+                        & ((J < 14) | (rsi < 23))
+                        & (rsi_j < 60) & (far_amp >= 45)
+                        & ((daily_amp < amp_range)
+                           | (super_ano & (daily_amp < amp_range + 3.2) & (C > O) & (C > white)))
+                        & (((C < O) & (V < REF(V, 1)) & (C >= yellow)) | (C >= O))
+                        & ((daily_pct < 2) | up_doji)
+                        & ok_green & sup_shrink & anomaly)
+
+    # 5. 回踩白线B
+    b_pb_white = (strong_trend
+                  & ((J < 30) | (rsi < 40) | wash_ano)
+                  & (rsi_j < 70)
+                  & ((daily_amp < amp_range + 0.5) | (dist_w < 1) | (dist_bbi < 1))
+                  & pb_white
+                  & ((daily_pct < 2) | ((daily_pct < 5) & white_sup))
+                  & ok_green & pb_shrink & anomaly & (L <= LC))
+
+    # 6. 回踩超级B
+    b_pb_super = (super_bull
+                  & ((J < 35) | (rsi < 45) | wash_ano)
+                  & (rsi_j < 80) & (rsi_j == LLV(rsi_j, 25))
+                  & (daily_amp < amp_range + 1)
+                  & ((daily_pct < 2.5) | (dist_w < 2))
+                  & strong_pb_hold & ok_green & anomaly & mod_shrink)
+
+    # 7. 回踩黄线B
+    b_pb_yellow = ((white >= yellow)
+                   & (C >= yellow * 0.975)
+                   & ((J < 13) | (rsi < 18))
+                   & pb_yellow & ok_green
+                   & (shrink | (mod_shrink & ((J == LLV(J, 20)) | (rsi == LLV(rsi, 14)))))
+                   & (yellow >= REF(yellow, 1) * 0.997)
+                   & (MA(C, 60) >= REF(MA(C, 60), 1))
+                   & (near_amp >= 11.9) & (far_amp >= 19.5))
+
+    b1 = (b_oversold_turn | b_oversold_shrink | b_raw
+          | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
+
+    return {
+        "weekly_bull": weekly_bull,
+        "above_ma30w": above_ma30w,
+        "recent_gc": recent_gc,
+        "b1": b1,
+        "shrink_score": shrink_score,
+        "white": white,
+        "yellow": yellow,
+        "close": C,
+        "high": H,
+        "low": L,
+        "dates": dates,
+    }
+
+
+def _scan_one_all_bars(code, params):
+    """加载单只股票数据并计算全量每bar信号，供并行预加载使用"""
+    try:
+        df = _process_reader.daily(symbol=code)
+        if df is None or len(df) < 300:
+            return code, None, False
+        df = df.sort_index()
+        signals = _compute_all_bar_signals(
+            df["close"].values.astype(float),
+            df["high"].values.astype(float),
+            df["low"].values.astype(float),
+            df["open"].values.astype(float),
+            df["volume"].values.astype(float),
+            df.index, params)
+        return code, signals, False
+    except Exception:
+        return code, None, True
+
+
+def preload_all_signals(start="2024-01-01", end="2025-12-31",
+                        stock_type="main", max_workers=SCAN_MAX_WORKERS,
+                        tdxdir=TDX_DIR, market=TDX_MARKET):
+    """并行预计算全部 A 股的每bar信号数据
+
+    Returns:
+        (all_signals, trading_days)
+        - all_signals: dict[str, dict]  股票代码 -> 信号数组字典
+        - trading_days: DatetimeIndex   回测区间内的交易日历
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    codes = _get_all_codes(tdxdir)
+    total = len(codes)
+    print(f"预加载 {total} 只A股信号... (workers={max_workers or 'auto'})")
+
+    params = {
+        "m1": 14, "m2": 28, "m3": 57, "m4": 114,
+        "n": 20, "m": 50, "n1": 3, "n2": 21,
+        "wma30": 30, "wma60": 60, "wma120": 120, "wma240": 240,
+        "gc_lookback": 20, "stock_type": stock_type,
+    }
+
+    all_signals = {}
+    errors = 0
+    done = 0
+    t0 = time.time()
+    all_dates = set()
+
+    with ProcessPoolExecutor(
+        max_workers=max_workers,
+        initializer=_init_process,
+        initargs=(tdxdir, market),
+    ) as pool:
+        futures = {
+            pool.submit(_scan_one_all_bars, code, params): code
+            for code in codes
+        }
+        for future in as_completed(futures):
+            code, signals, err = future.result()
+            done += 1
+            if err:
+                errors += 1
+            elif signals is not None:
+                all_signals[code] = signals
+                if hasattr(signals["dates"], "to_list"):
+                    all_dates.update(signals["dates"])
+            if done % 500 == 0:
+                print(f"  ... 已处理 {done}/{total} ({done/total*100:.0f}%)  "
+                      f"有效 {len(all_signals)}  耗时 {time.time()-t0:.1f}s")
+
+    elapsed = time.time() - t0
+
+    # 构建交易日历
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    sorted_dates = sorted(d for d in all_dates if start_ts <= d <= end_ts)
+    trading_days = pd.DatetimeIndex(sorted_dates)
+
+    print(f"\n  预加载完成: {len(all_signals)} 只  错误 {errors}  "
+          f"交易日 {len(trading_days)}  耗时 {elapsed:.1f}s")
+
+    return all_signals, trading_days

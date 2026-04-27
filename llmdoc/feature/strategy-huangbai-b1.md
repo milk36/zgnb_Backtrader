@@ -70,22 +70,39 @@
 
 `_compute_signals()` 与 `HuangBaiB1Strategy.indicators()` 的 B1 逻辑是手动同步的纯 NumPy/MyTT 复刻版本，策略指标变更时需同步更新此函数。
 
+### 组合级模拟（PortfolioSimulator）
+
+正确的回测方式：在回测区间内，每周一执行周线多头扫描更新观察池，每日检查金叉+B1选股，按缩量排序取最优买入，组合级仓位管理。
+
+| 函数/类 | 说明 |
+|---------|------|
+| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score 等），基于 `indicators()` 的逻辑 |
+| `_scan_one_all_bars(code, params)` | 并行加载单只股票数据并调用 `_compute_all_bar_signals()` |
+| `preload_all_signals(start, end, stock_type, max_workers)` | 用 ProcessPoolExecutor 并行预计算全部 A 股的每 bar 信号，返回 `(all_signals, trading_days)` |
+| `PortfolioSimulator`（`src/engine/portfolio_simulator.py`） | 组合级日频模拟引擎：100万资金、最多10只、每只10万，周更观察池+日检查买卖 |
+
+组合模拟流程：
+1. Phase 1: `preload_all_signals()` 并行预计算全部 A 股信号（~55秒，16 workers）
+2. Phase 2: `PortfolioSimulator.run()` 逐日模拟（周一更新观察池 → 每日检查金叉+B1 → 买入缩量最优 → 检查卖出条件）
+
+卖出优先级：止损 → T+N没涨 → 跌破白线（半仓后持股模式）→ 涨停卖1/2 → 中阳卖1/3
+
 CLI 入口：
 
-- `python main.py --strategy huangbai --scan` — 全市场扫描 + 自动回测（两阶段流程）
-- `python main.py --strategy huangbai --scan-only` — 仅扫描选股，不进入回测
+- `python main.py --strategy huangbai --portfolio` — 组合级模拟（正确的时间序列模拟）
+- `python main.py --strategy huangbai --scan` — 全市场扫描 + 逐只回测（旧模式）
+- `python main.py --strategy huangbai --scan-only` — 仅扫描选股
 - `python main.py --strategy huangbai --symbol 002475` — 指定股票回测
 - `--stock-type main/tech` 切换主板/创业板振幅参数
 
-两阶段流程：Phase 1 调用 `scan_all()` 扫描全部 A 股得到候选列表 → Phase 2 对每只候选股独立运行 `Backtester` 回测 → 汇总输出平均收益、总交易数、胜负比。
-
 ## 3. Relevant Code Modules
 
-- `src/strategies/huangbai_b1_strategy.py` - 策略主文件（HuangBaiB1Strategy类、_weekly_ma、_ref_at辅助函数、scan_all/_get_all_codes/_compute_signals扫描函数）
+- `src/strategies/huangbai_b1_strategy.py` - 策略主文件（HuangBaiB1Strategy类、扫描函数、组合级预加载函数）
+- `src/engine/portfolio_simulator.py` - PortfolioSimulator组合级模拟引擎（日频模拟、仓位管理、报告生成）
 - `src/strategies/base_strategy.py` - 基类（停牌/涨跌停过滤、订单管理）
 - `src/indicators/kdj_indicator.py` - KDJ指标（提供J值用于B1条件）
-- `config.py` - HUANGBAI_* 系列参数、TDX_DIR/TDX_MARKET 配置
-- `main.py` - 统一 CLI 入口：`--strategy huangbai --scan` 全市场扫描+回测、`--scan-only` 仅扫描、`--symbol` 指定股票回测；`--stock-type main/tech` 切换板块参数
+- `config.py` - HUANGBAI_* 系列参数、PORTFOLIO_* 组合参数、TDX_DIR/TDX_MARKET 配置
+- `main.py` - 统一 CLI 入口：`--portfolio` 组合模拟、`--scan` 扫描+逐只回测、`--scan-only` 仅扫描、`--symbol` 指定股票回测
 
 ## 4. Attention
 
@@ -96,4 +113,7 @@ CLI 入口：
 - `position_pct` 默认0.1（10%仓位），与KDJ策略的0.9不同，设计上采用多笔小仓位
 - `log()` 方法自动从 `self.data._name` 获取股票代码，所有日志行均包含代码标识
 - `_compute_signals()` 是策略 B1 逻辑的纯 MyTT 复刻版本，策略指标变更时需同步更新此函数
-- 扫描约 5202 只股票耗时约 3.5 分钟（单线程），`skip_weekly`/`skip_gc` 参数可跳过对应过滤级便于调试
+- `_compute_all_bar_signals()` 是 `indicators()` 的向量版本，B1 逻辑变更需同步三个位置：`indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`
+- 扫描约 5202 只股票耗时约 40 秒（16 workers），预加载全量信号约 55 秒
+- `PortfolioSimulator` 中 T+N 按交易日计算（通过 trading_days 索引差值），非自然日
+- 止损逻辑：白线上方→最低价止损，白线黄线之间→黄线止损，黄线之下→最低价止损

@@ -36,5 +36,10 @@ HUANGBAI_GC_LOOKBACK = 20  # 金叉回溯天数
 STOCK_TYPE = "main"   # "main" 或 "tech"
 SCAN_MAX_WORKERS = 16  # 全市场扫描线程数，None=自动(CPU核心数)，1=单线程
 
+# 组合模拟参数
+PORTFOLIO_INITIAL_CASH = 1_000_000   # 100万
+PORTFOLIO_MAX_POSITIONS = 10         # 最多10只
+PORTFOLIO_PER_POSITION = 100_000     # 每只10万
+
 # 绘图
 PLOT_ENABLED = True
