@@ -121,7 +121,7 @@ def main():
             log_dir=LOG_DIR)
         sim.run()
         report = sim.report()
-        PortfolioSimulator.print_report(report)
+        PortfolioSimulator.print_report(report, log_file=sim._log_file)
         return
 
     # ---- huangbai 策略：全市场扫描 + 回测 ----

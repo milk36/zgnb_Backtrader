@@ -96,6 +96,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
         self._last_sl_bar = None
+        self._mid_yang_triggered = False
         self.indicators()
 
     # ------------------------------------------------------------------ #
@@ -351,19 +352,22 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.stop_loss_price = sl
         self.hold_until_below_white = False
         self.initial_size = 0
+        self._mid_yang_triggered = False
 
         self.log(f"买入  @ {self.data.close[0]:.2f}  止损={sl:.2f}")
 
     def _check_exit(self):
         idx = len(self) - 1
         price = self.data.close[0]
+        white_val = self._white[idx]
         bars_held = len(self) - self.buy_info["bar"]
 
-        # 记录初始仓位（成交后首次进入时记录）
         if self.initial_size == 0:
             self.initial_size = self.position.size
 
-        # --- 止损 ---
+        pct_gain = (price - self.buy_info["price"]) / self.buy_info["price"] * 100
+
+        # --- 1. 止损 ---
         if price <= self.stop_loss_price:
             self.order = self.order_target_percent(target=0.0)
             self._last_sl_bar = len(self)
@@ -371,23 +375,43 @@ class HuangBaiB1Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
-        # --- T+3 没涨清仓 ---
+        # --- 2. T+3 没涨清仓 ---
         if bars_held >= self.p.t_plus_n and price <= self.buy_info["price"]:
             self.order = self.order_target_percent(target=0.0)
+            self._last_sl_bar = len(self)
             self.log(f"T+{bars_held} 清仓 @ {price:.2f}")
             self._reset_position_state()
             return
 
-        # --- 持股至跌破白线 ---
-        if self.hold_until_below_white:
-            if price < self._white[idx]:
-                self.order = self.order_target_percent(target=0.0)
-                self.log(f"跌破白线 @ {price:.2f}")
-                self._reset_position_state()
+        # --- 3. 盈利100%清仓 ---
+        if pct_gain >= 100:
+            self.order = self.order_target_percent(target=0.0)
+            self._last_sl_bar = len(self)
+            self.log(f"盈利100%清仓 @ {price:.2f}")
+            self._reset_position_state()
             return
 
-        # --- 涨停卖 1/2 ---
-        if price >= self.data.high[0] * 0.995:
+        # --- 4. 半仓持股模式 ---
+        if self.hold_until_below_white:
+            if pct_gain <= 20:
+                # 盈利20%以内：盈转亏清仓
+                if price <= self.buy_info["price"]:
+                    self.order = self.order_target_percent(target=0.0)
+                    self._last_sl_bar = len(self)
+                    self.log(f"半仓盈转亏清仓 @ {price:.2f}")
+                    self._reset_position_state()
+            else:
+                # 盈利>20%：跌破白线清仓
+                if price < white_val:
+                    self.order = self.order_target_percent(target=0.0)
+                    self._last_sl_bar = len(self)
+                    self.log(f"半仓跌破白线 @ {price:.2f}")
+                    self._reset_position_state()
+            return
+
+        # --- 5. 涨停卖1/2（中阳未触发时才触发） ---
+        mid_yang = 10 if self.p.stock_type == "tech" else 5
+        if not self._mid_yang_triggered and price >= self.data.high[0] * 0.995:
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
@@ -396,13 +420,12 @@ class HuangBaiB1Strategy(BaseStrategy):
                     self.hold_until_below_white = True
             return
 
-        # --- 中阳卖 1/3 ---
-        pct_gain = (price - self.buy_info["price"]) / self.buy_info["price"] * 100
-        mid_yang = 10 if self.p.stock_type == "tech" else 5
+        # --- 6. 中阳卖1/3 ---
         if pct_gain >= mid_yang:
             sell_size = max(1, int(self.position.size / 3))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
+                self._mid_yang_triggered = True
                 self.log(f"中阳卖1/3 @ {price:.2f}")
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True

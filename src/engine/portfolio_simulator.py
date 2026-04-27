@@ -20,6 +20,7 @@ class Position:
         "code", "buy_date", "buy_price", "buy_low",
         "white_at_buy", "yellow_at_buy", "stop_loss",
         "size", "initial_size", "hold_until_below_white",
+        "mid_yang_triggered",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -34,6 +35,7 @@ class Position:
         self.size = size
         self.initial_size = size
         self.hold_until_below_white = False
+        self.mid_yang_triggered = False
 
 
 class PortfolioSimulator:
@@ -131,8 +133,6 @@ class PortfolioSimulator:
             # 记录每日权益
             equity = self._calc_equity(td)
             self._equity_curve.append(equity)
-
-        self._log_file.close()
 
     def _update_watchlist(self, date):
         """遍历全部股票，更新周线多头观察池"""
@@ -254,7 +254,6 @@ class PortfolioSimulator:
             if price <= 0:
                 continue
 
-            # 记录初始仓位（首次检查时）
             if pos.initial_size == 0:
                 pos.initial_size = pos.size
 
@@ -264,8 +263,10 @@ class PortfolioSimulator:
             if buy_idx is not None and cur_idx is not None:
                 bars_held = cur_idx - buy_idx
             else:
-                bars_held = (date - pos.buy_date).days  # fallback
+                bars_held = (date - pos.buy_date).days
             days_held = bars_held
+
+            pct_gain = (price - pos.buy_price) / pos.buy_price * 100
 
             # 1. 止损
             if price <= pos.stop_loss:
@@ -278,19 +279,44 @@ class PortfolioSimulator:
 
             # 2. T+N 没涨清仓
             if days_held >= self._t_plus_n and price <= pos.buy_price:
+                cur_idx = self._td_index.get(date)
+                if cur_idx is not None:
+                    self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, price, date, f"T+{days_held}清仓")
                 to_remove.append(code)
                 continue
 
-            # 3. 持股至跌破白线（优先级高于4、5）
-            if pos.hold_until_below_white:
-                if price < white_val:
-                    self._sell_position(code, pos, price, date, "跌破白线")
-                    to_remove.append(code)
+            # 3. 盈利100%清仓
+            if pct_gain >= 100:
+                cur_idx = self._td_index.get(date)
+                if cur_idx is not None:
+                    self._cooldown[code] = cur_idx
+                self._sell_position(code, pos, price, date, "盈利100%清仓")
+                to_remove.append(code)
                 continue
 
-            # 4. 涨停卖 1/2
-            if price >= high * 0.995:
+            # 4. 半仓持股模式
+            if pos.hold_until_below_white:
+                if pct_gain <= 20:
+                    # 盈利20%以内：盈转亏清仓
+                    if price <= pos.buy_price:
+                        cur_idx = self._td_index.get(date)
+                        if cur_idx is not None:
+                            self._cooldown[code] = cur_idx
+                        self._sell_position(code, pos, price, date, "半仓盈转亏清仓")
+                        to_remove.append(code)
+                else:
+                    # 盈利>20%：跌破白线清仓
+                    if price < white_val:
+                        cur_idx = self._td_index.get(date)
+                        if cur_idx is not None:
+                            self._cooldown[code] = cur_idx
+                        self._sell_position(code, pos, price, date, "半仓跌破白线")
+                        to_remove.append(code)
+                continue
+
+            # 5. 涨停卖1/2（中阳未触发时才触发）
+            if not pos.mid_yang_triggered and price >= high * 0.995:
                 sell_size = max(1, pos.size // 2)
                 if sell_size < pos.size:
                     self._sell_partial(code, pos, sell_size, price, date, "涨停卖半")
@@ -298,13 +324,13 @@ class PortfolioSimulator:
                         pos.hold_until_below_white = True
                 continue
 
-            # 5. 中阳卖 1/3
-            pct_gain = (price - pos.buy_price) / pos.buy_price * 100
+            # 6. 中阳卖1/3
             mid_yang = 10 if self._stock_type == "tech" else 5
             if pct_gain >= mid_yang:
                 sell_size = max(1, pos.size // 3)
                 if sell_size < pos.size:
                     self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
+                    pos.mid_yang_triggered = True
                     if pos.size <= pos.initial_size // 2:
                         pos.hold_until_below_white = True
 
@@ -397,40 +423,49 @@ class PortfolioSimulator:
         }
 
     @staticmethod
-    def print_report(report):
-        """打印回测报告"""
-        print(f"\n{'=' * 55}")
-        print(f"          组合回测报告")
-        print(f"{'=' * 55}")
-        print(f"  回测区间:    {report['trading_days']} 个交易日")
-        print(f"  初始资金:    {report['initial_cash']:>12,.2f}")
-        print(f"  最终资金:    {report['final_value']:>12,.2f}")
-        print(f"  总收益率:    {report['total_return']:>11.2f}%")
-        print(f"  最大回撤:    {report['max_drawdown']:>11.2f}%")
+    def print_report(report, log_file=None):
+        """打印回测报告（同时写入日志文件）"""
+        def _out(msg):
+            print(msg)
+            if log_file and not log_file.closed:
+                log_file.write(msg + "\n")
+                log_file.flush()
+
+        _out(f"\n{'=' * 55}")
+        _out(f"          组合回测报告")
+        _out(f"{'=' * 55}")
+        _out(f"  回测区间:    {report['trading_days']} 个交易日")
+        _out(f"  初始资金:    {report['initial_cash']:>12,.2f}")
+        _out(f"  最终资金:    {report['final_value']:>12,.2f}")
+        _out(f"  总收益率:    {report['total_return']:>11.2f}%")
+        _out(f"  最大回撤:    {report['max_drawdown']:>11.2f}%")
 
         sharpe = report["sharpe"]
         if sharpe is not None:
-            print(f"  夏普比率:    {sharpe:>11.4f}")
+            _out(f"  夏普比率:    {sharpe:>11.4f}")
         else:
-            print(f"  夏普比率:        N/A")
+            _out(f"  夏普比率:        N/A")
 
-        print(f"  总交易次数:  {report['total_trades']:>12}")
-        print(f"  盈利次数:    {report['won']:>12}")
-        print(f"  亏损次数:    {report['lost']:>12}")
+        _out(f"  总交易次数:  {report['total_trades']:>12}")
+        _out(f"  盈利次数:    {report['won']:>12}")
+        _out(f"  亏损次数:    {report['lost']:>12}")
         won = report["won"]
         total = won + report["lost"]
         if total > 0:
-            print(f"  胜率:        {won / total * 100:>11.2f}%")
+            _out(f"  胜率:        {won / total * 100:>11.2f}%")
 
         # 交易明细（最近20笔）
         trades = report["trade_list"]
         if trades:
-            print(f"\n  --- 交易明细 (共 {len(trades)} 笔) ---")
+            _out(f"\n  --- 交易明细 (共 {len(trades)} 笔) ---")
             for t in trades[-20:]:
                 bd = t["buy_date"].strftime("%Y-%m-%d") if hasattr(t["buy_date"], "strftime") else str(t["buy_date"])
                 sd = t["sell_date"].strftime("%Y-%m-%d") if hasattr(t["sell_date"], "strftime") else str(t["sell_date"])
-                print(f"  {t['code']}  {bd}→{sd}  "
-                      f"{t['buy_price']:.2f}→{t['sell_price']:.2f}  "
-                      f"{t['pnl_pct']:+.2f}%  {t['reason']}")
+                _out(f"  {t['code']}  {bd}→{sd}  "
+                     f"{t['buy_price']:.2f}→{t['sell_price']:.2f}  "
+                     f"{t['pnl_pct']:+.2f}%  {t['reason']}")
 
-        print(f"{'=' * 55}")
+        _out(f"{'=' * 55}")
+
+        if log_file and not log_file.closed:
+            log_file.close()
