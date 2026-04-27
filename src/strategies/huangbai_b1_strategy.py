@@ -95,6 +95,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.stop_loss_price = None
         self.hold_until_below_white = False
         self.initial_size = 0
+        self._last_sl_bar = None
         self.indicators()
 
     # ------------------------------------------------------------------ #
@@ -326,6 +327,9 @@ class HuangBaiB1Strategy(BaseStrategy):
 
         if not weekly_ok or not gc_ok or not b1_ok:
             return
+        # 止损冷却：2周内不再买入同一只股票
+        if self._last_sl_bar is not None and (len(self) - self._last_sl_bar) < 10:
+            return
         if self.is_limit_up():
             return
 
@@ -362,6 +366,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         # --- 止损 ---
         if price <= self.stop_loss_price:
             self.order = self.order_target_percent(target=0.0)
+            self._last_sl_bar = len(self)
             self.log(f"止损 @ {price:.2f}")
             self._reset_position_state()
             return
@@ -408,6 +413,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.stop_loss_price = None
         self.hold_until_below_white = False
         self.initial_size = 0
+        # 注意：不重置 _last_sl_bar，冷却期需要保留
 
     def log(self, txt: str, dt=None):
         if self.p.print_log:

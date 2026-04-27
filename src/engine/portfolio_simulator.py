@@ -99,6 +99,7 @@ class PortfolioSimulator:
         self._equity_curve = []      # 每日总权益
         self._trade_list = []        # 已完成交易记录
         self._last_month = (-1, -1)  # 上次更新观察池的 (year, month)
+        self._cooldown = {}          # 止损冷却: code -> (stop_loss_date, td_index)
 
         # 诊断：打印交易日历范围
         if len(self._trading_days) > 0:
@@ -135,10 +136,18 @@ class PortfolioSimulator:
 
     def _update_watchlist(self, date):
         """遍历全部股票，更新周线多头观察池"""
+        cur_idx = self._td_index.get(date, 0)
         self._watchlist = set()
         for code, sig in self._all_signals.items():
             if code in self._positions:
                 continue
+            # 止损冷却期：2周（10个交易日）内不再纳入观察池
+            if code in self._cooldown:
+                sl_idx = self._cooldown[code]
+                if cur_idx - sl_idx < 10:
+                    continue
+                else:
+                    del self._cooldown[code]
             idx = self._find_bar_index(code, date)
             if idx is None:
                 continue
@@ -260,6 +269,9 @@ class PortfolioSimulator:
 
             # 1. 止损
             if price <= pos.stop_loss:
+                cur_idx = self._td_index.get(date)
+                if cur_idx is not None:
+                    self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, price, date, "止损")
                 to_remove.append(code)
                 continue
