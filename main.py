@@ -21,9 +21,8 @@ from config import (
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
-from src.scanner import scan_all
 from src.strategies.kdj_cross_strategy import KDJCrossStrategy
-from src.strategies.huangbai_b1_strategy import HuangBaiB1Strategy
+from src.strategies.huangbai_b1_strategy import HuangBaiB1Strategy, scan_all
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,

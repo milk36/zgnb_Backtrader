@@ -4,6 +4,8 @@
 
 周线多头空间 + 黄白线金叉 + B1买入信号的中短线策略。通过周线级别趋势过滤、日线级别黄白线关系判定入场时机，以7种B1子条件捕捉超卖回踩买点，配合分层止盈止损管理仓位。
 
+本策略文件同时包含全市场周线多头选股扫描功能（`scan_all`），设计理由：周线多头筛选是策略逻辑的一部分，应归属于策略文件而非独立模块。
+
 ## 2. How it Works
 
 ### 入场三重过滤（AND关系）
@@ -54,13 +56,29 @@
 - 过滤结果：`[日期] 代码 周线=Y/N 金叉=Y/N B1=Y/N C=价格 J=值 RSI=值 <<< SELECT`
 - `_print_filter_result()` 仅在 B1 信号触发或三级全部通过时输出
 
+### 全市场选股扫描（模块级函数）
+
+扫描逻辑作为策略文件的模块级函数实现，独立于 Backtrader 引擎运行。直接使用 MyTT 计算指标（不经过逐 bar 机制），对全部 A 股执行三级过滤，命中结果按缩量评分排序输出。
+
+| 函数 | 说明 |
+|------|------|
+| `_get_all_codes(tdxdir)` | 从通达信本地目录（`vipdoc/sz/lday`、`vipdoc/sh/lday`）提取全部 A 股代码（去重、去指数），约 5202 只 |
+| `_compute_signals(C, H, L, O, V, dates, params)` | 对单只股票计算最新 bar 的三级过滤结果，直接用 MyTT 不依赖 Backtrader，数据不足 300 条返回 None |
+| `scan_all(stock_type, skip_weekly, skip_gc, tdxdir, market)` | 全市场扫描入口，遍历所有股票调用 `_compute_signals`，命中结果按 `shrink_score` 升序排列 |
+
+数据流：`_get_all_codes()` -> 遍历每只股票 -> mootdx `Reader` 读取日线 -> `_compute_signals()` 计算三级过滤 -> 命中结果按缩量评分排序。
+
+`_compute_signals()` 与 `HuangBaiB1Strategy.indicators()` 的 B1 逻辑是手动同步的纯 NumPy/MyTT 复刻版本，策略指标变更时需同步更新此函数。
+
+CLI 入口：`python main.py --scan`（不进入回测流程，不需要 `--symbol`）。`--scan --stock-type tech` 仅创业板风格参数。
+
 ## 3. Relevant Code Modules
 
-- `src/strategies/huangbai_b1_strategy.py` - 策略主文件（HuangBaiB1Strategy类、_weekly_ma、_ref_at辅助函数）
+- `src/strategies/huangbai_b1_strategy.py` - 策略主文件（HuangBaiB1Strategy类、_weekly_ma、_ref_at辅助函数、scan_all/_get_all_codes/_compute_signals扫描函数）
 - `src/strategies/base_strategy.py` - 基类（停牌/涨跌停过滤、订单管理）
 - `src/indicators/kdj_indicator.py` - KDJ指标（提供J值用于B1条件）
-- `config.py` - HUANGBAI_* 系列参数
-- `main.py` - `--strategy huangbai --stock-type main/tech` 入口
+- `config.py` - HUANGBAI_* 系列参数、TDX_DIR/TDX_MARKET 配置
+- `main.py` - `--strategy huangbai --stock-type main/tech` 入口；`--scan` 模式调用 `scan_all()`
 
 ## 4. Attention
 
@@ -70,4 +88,5 @@
 - B1条件依赖大量MyTT函数（HHV/LLV/EVERY/EXIST/COUNT/BARSLAST/HHVBARS），确保MyTT版本兼容
 - `position_pct` 默认0.1（10%仓位），与KDJ策略的0.9不同，设计上采用多笔小仓位
 - `log()` 方法自动从 `self.data._name` 获取股票代码，所有日志行均包含代码标识
-- B1 指标逻辑在 `src/scanner.py` 中有独立的纯 MyTT 复刻版本，策略变更时需同步
+- `_compute_signals()` 是策略 B1 逻辑的纯 MyTT 复刻版本，策略指标变更时需同步更新此函数
+- 扫描约 5202 只股票耗时约 3.5 分钟（单线程），`skip_weekly`/`skip_gc` 参数可跳过对应过滤级便于调试

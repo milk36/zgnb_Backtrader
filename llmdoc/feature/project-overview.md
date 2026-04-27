@@ -14,8 +14,8 @@ main.py (CLI 入口，参数解析)
   ├── src/data/tdx_feed.py (数据层：通达信数据读取)
   ├── src/indicators/ (指标层：MyTT 计算)
   ├── src/strategies/ (策略层：信号生成 + 交易逻辑)
-  ├── src/engine/backtester.py (引擎层：Cerebro 封装)
-  └── src/scanner.py (扫描层：全市场选股，不依赖 Backtrader)
+  │   └── huangbai_b1_strategy.py (含全市场扫描函数 scan_all)
+  └── src/engine/backtester.py (引擎层：Cerebro 封装)
 ```
 
 ### 核心数据流
@@ -32,7 +32,7 @@ main.py (CLI 入口，参数解析)
 
 | 模式 | 触发参数 | 说明 |
 |------|---------|------|
-| 全市场扫描 | `--scan` | 调用 `src/scanner.py`，直接用 MyTT 计算指标，输出选股结果，不进入回测 |
+| 全市场扫描 | `--scan` | 调用 `huangbai_b1_strategy.scan_all()`，直接用 MyTT 计算指标，输出选股结果，不进入回测 |
 | 单股/多股回测 | `--symbol`（默认） | 通过 Backtrader 引擎执行回测，可选 `--strategy` / `--stock-type` |
 
 ### 策略选择机制
