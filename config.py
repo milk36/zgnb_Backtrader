@@ -34,6 +34,7 @@ HUANGBAI_N2 = 21      # LONG 周期
 HUANGBAI_T_PLUS_N = 3 # T+N 天
 HUANGBAI_GC_LOOKBACK = 20  # 金叉回溯天数
 STOCK_TYPE = "main"   # "main" 或 "tech"
+SCAN_MAX_WORKERS = 16  # 全市场扫描线程数，None=自动(CPU核心数)，1=单线程
 
 # 绘图
 PLOT_ENABLED = True

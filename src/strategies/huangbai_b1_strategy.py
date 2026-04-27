@@ -27,7 +27,7 @@ from mootdx.reader import Reader
 from src.indicators.kdj_indicator import KDJIndicator
 from src.strategies.base_strategy import BaseStrategy
 
-from config import TDX_DIR, TDX_MARKET
+from config import TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS
 
 
 # ---------- helper ----------
@@ -630,12 +630,55 @@ def _compute_signals(C, H, L, O, V, dates, params):
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
+# ---------- 多进程扫描 ----------
+
+_process_reader = None
+
+
+def _init_process(tdxdir, market):
+    """子进程初始化：每个进程创建自己的 Reader"""
+    global _process_reader
+    _process_reader = Reader.factory(market=market, tdxdir=tdxdir)
+
+
+def _scan_one(code, params, skip_weekly, skip_gc):
+    """扫描单只股票，返回 (code, sig|None, error)"""
+    try:
+        df = _process_reader.daily(symbol=code)
+        if df is None or len(df) < 300:
+            return code, None, False
+        df = df.sort_index()
+        sig = _compute_signals(
+            df["close"].values.astype(float),
+            df["high"].values.astype(float),
+            df["low"].values.astype(float),
+            df["open"].values.astype(float),
+            df["volume"].values.astype(float),
+            df.index, params)
+        if sig is None:
+            return code, None, False
+        weekly_ok = skip_weekly or sig["weekly"]
+        gc_ok = skip_gc or sig["gc"]
+        if sig["b1"] and weekly_ok and gc_ok:
+            sig["code"] = code
+            return code, sig, False
+        return code, None, False
+    except Exception:
+        return code, None, True
+
+
 def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
-             tdxdir=TDX_DIR, market=TDX_MARKET):
-    """全市场周线多头筛选，返回符合条件的股票列表"""
-    reader = Reader.factory(market=market, tdxdir=tdxdir)
+             tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS):
+    """全市场周线多头筛选，返回符合条件的股票列表
+
+    Args:
+        max_workers: 进程池大小，None 表示默认（CPU核心数），1 为单进程模式
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
     codes = _get_all_codes(tdxdir)
-    print(f"扫描 {len(codes)} 只A股...")
+    total = len(codes)
+    print(f"扫描 {total} 只A股... (workers={max_workers or 'auto'})")
 
     params = {
         "m1": 14, "m2": 28, "m3": 57, "m4": 114,
@@ -645,45 +688,38 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
     }
 
     results = []
-    t0 = time.time()
     errors = 0
+    done = 0
+    t0 = time.time()
 
-    for idx, code in enumerate(codes):
-        try:
-            df = reader.daily(symbol=code)
-            if df is None or len(df) < 300:
-                continue
-            df = df.sort_index()
-            sig = _compute_signals(
-                df["close"].values.astype(float),
-                df["high"].values.astype(float),
-                df["low"].values.astype(float),
-                df["open"].values.astype(float),
-                df["volume"].values.astype(float),
-                df.index, params)
-            if sig is None:
-                continue
-
-            weekly_ok = skip_weekly or sig["weekly"]
-            gc_ok = skip_gc or sig["gc"]
-            if sig["b1"] and weekly_ok and gc_ok:
-                sig["code"] = code
+    with ProcessPoolExecutor(
+        max_workers=max_workers,
+        initializer=_init_process,
+        initargs=(tdxdir, market),
+    ) as pool:
+        futures = {
+            pool.submit(_scan_one, code, params, skip_weekly, skip_gc): code
+            for code in codes
+        }
+        for future in as_completed(futures):
+            code, sig, err = future.result()
+            done += 1
+            if err:
+                errors += 1
+            elif sig is not None:
                 results.append(sig)
-                print(f"  [{df.index[-1].strftime('%Y-%m-%d')}] {code}  "
+                print(f"  {code}  "
                       f"C={sig['close']:.2f}  J={sig['J']:.1f}  RSI={sig['RSI']:.1f}  "
                       f"缩量={sig['shrink_score']:.3f}")
-        except Exception:
-            errors += 1
-
-        if (idx + 1) % 500 == 0:
-            print(f"  ... 已扫描 {idx + 1}/{len(codes)} ({(idx+1)/len(codes)*100:.0f}%)  "
-                  f"命中 {len(results)}  耗时 {time.time()-t0:.1f}s")
+            if done % 500 == 0:
+                print(f"  ... 已扫描 {done}/{total} ({done/total*100:.0f}%)  "
+                      f"命中 {len(results)}  耗时 {time.time()-t0:.1f}s")
 
     elapsed = time.time() - t0
     results.sort(key=lambda x: x["shrink_score"])
 
     print(f"\n{'=' * 55}")
-    print(f"  扫描完成: {len(codes)} 只  命中 {len(results)} 只  "
+    print(f"  扫描完成: {total} 只  命中 {len(results)} 只  "
           f"错误 {errors}  耗时 {elapsed:.1f}s")
     print(f"{'=' * 55}")
 
