@@ -19,6 +19,7 @@ from config import (
     PORTFOLIO_INITIAL_CASH,
     PORTFOLIO_MAX_POSITIONS,
     PORTFOLIO_PER_POSITION,
+    LOG_DIR,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
@@ -116,7 +117,8 @@ def main():
             max_positions=PORTFOLIO_MAX_POSITIONS,
             per_position_cash=PORTFOLIO_PER_POSITION,
             commission=COMMISSION,
-            stock_type=args.stock_type)
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report)

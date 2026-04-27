@@ -1038,4 +1038,12 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
     print(f"\n  预加载完成: {len(all_signals)} 只  错误 {errors}  "
           f"交易日 {len(trading_days)}  耗时 {elapsed:.1f}s")
 
+    # 诊断：打印实际数据年份覆盖
+    if len(trading_days) > 0:
+        first = trading_days[0]
+        last = trading_days[-1]
+        years = pd.Series(trading_days.year).value_counts().sort_index()
+        year_info = "  ".join(f"{y}年:{c}天" for y, c in years.items())
+        print(f"  数据范围: {first.strftime('%Y-%m-%d')} ~ {last.strftime('%Y-%m-%d')}  [{year_info}]")
+
     return all_signals, trading_days

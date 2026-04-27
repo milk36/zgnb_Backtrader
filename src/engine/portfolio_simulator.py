@@ -6,6 +6,9 @@
 - 组合级仓位管理：100万总资金，最多10只，每只10万
 """
 
+import os
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -39,7 +42,7 @@ class PortfolioSimulator:
     def __init__(self, all_signals, trading_days,
                  initial_cash=1_000_000, max_positions=10,
                  per_position_cash=100_000, commission=0.0003,
-                 stock_type="main", t_plus_n=3):
+                 stock_type="main", t_plus_n=3, log_dir="logs"):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._initial_cash = initial_cash
@@ -48,6 +51,12 @@ class PortfolioSimulator:
         self._commission = commission
         self._stock_type = stock_type
         self._t_plus_n = t_plus_n
+
+        # 日志文件（追加模式）
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._log_path = os.path.join(log_dir, f"portfolio_{ts}.log")
+        self._log_file = open(self._log_path, "a", encoding="utf-8")
 
         # 为每只股票预构建日期查找索引
         self._date_indices = {}
@@ -60,6 +69,12 @@ class PortfolioSimulator:
             else:
                 arr = pd.to_datetime(dates).values
             self._date_indices[code] = arr
+
+    def _log(self, msg):
+        """同时输出到控制台和日志文件"""
+        print(msg)
+        self._log_file.write(msg + "\n")
+        self._log_file.flush()
 
     def _find_bar_index(self, code, target_date):
         """找到 target_date 在该股票数据中的 bar 索引
@@ -85,6 +100,16 @@ class PortfolioSimulator:
         self._trade_list = []        # 已完成交易记录
         self._last_month = (-1, -1)  # 上次更新观察池的 (year, month)
 
+        # 诊断：打印交易日历范围
+        if len(self._trading_days) > 0:
+            first = self._trading_days[0]
+            last = self._trading_days[-1]
+            years = pd.Series(self._trading_days.year).value_counts().sort_index()
+            year_info = "  ".join(f"{y}年:{c}天" for y, c in years.items())
+            self._log(f"  交易日历: {first.strftime('%Y-%m-%d')} ~ {last.strftime('%Y-%m-%d')}  "
+                      f"共{len(self._trading_days)}天  [{year_info}]")
+            self._log(f"  日志文件: {self._log_path}")
+
         # 构建交易日 → 序号映射（用于计算持仓交易日数）
         self._td_index = {td: i for i, td in enumerate(self._trading_days)}
 
@@ -94,6 +119,7 @@ class PortfolioSimulator:
             if year_month != self._last_month:
                 self._update_watchlist(td)
                 self._last_month = year_month
+                self._log(f"  [{td.strftime('%Y-%m-%d')}] 月度更新观察池: {len(self._watchlist)} 只")
 
             # 每日卖出检查
             self._check_exits(td)
@@ -104,6 +130,8 @@ class PortfolioSimulator:
             # 记录每日权益
             equity = self._calc_equity(td)
             self._equity_curve.append(equity)
+
+        self._log_file.close()
 
     def _update_watchlist(self, date):
         """遍历全部股票，更新周线多头观察池"""
@@ -192,9 +220,9 @@ class PortfolioSimulator:
         self._positions[code] = pos
         self._cash -= total_cost
 
-        print(f"  [{date.strftime('%Y-%m-%d')}] 买入 {code}  "
-              f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
-              f"缩量={score:.3f}")
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] 买入 {code}  "
+                  f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
+                  f"缩量={score:.3f}")
 
     def _check_exits(self, date):
         """检查所有持仓的卖出条件"""
@@ -286,16 +314,16 @@ class PortfolioSimulator:
             "pnl_pct": pnl,
             "reason": reason,
         })
-        print(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
-              f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}")
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
+                  f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}")
 
     def _sell_partial(self, code, pos, sell_size, price, date, reason):
         """部分卖出"""
         proceeds = sell_size * price * (1 - self._commission)
         self._cash += proceeds
         pos.size -= sell_size
-        print(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
-              f"部分 {sell_size}股  价格={price:.2f}  {reason}")
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
+                  f"部分 {sell_size}股  价格={price:.2f}  {reason}")
 
     def _calc_equity(self, date):
         """计算当日总权益 = 现金 + 持仓市值"""
