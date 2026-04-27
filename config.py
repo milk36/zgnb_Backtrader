@@ -9,7 +9,7 @@ INITIAL_CASH = 100000.0
 COMMISSION = 0.0003  # 万三
 
 # 默认回测区间
-DEFAULT_START_DATE = "2020-01-01"
+DEFAULT_START_DATE = "2024-01-01"
 DEFAULT_END_DATE = "2025-12-31"
 
 # 默认股票
@@ -21,6 +21,19 @@ KDJ_M1 = 3
 KDJ_M2 = 3
 MA_PERIOD = 5
 POSITION_PCT = 0.9
+
+# 黄白线B1策略参数
+HUANGBAI_M1 = 14
+HUANGBAI_M2 = 28
+HUANGBAI_M3 = 57
+HUANGBAI_M4 = 114
+HUANGBAI_N = 20       # 近期振幅周期
+HUANGBAI_M = 50       # 远期振幅周期
+HUANGBAI_N1 = 3       # SHORT 周期
+HUANGBAI_N2 = 21      # LONG 周期
+HUANGBAI_T_PLUS_N = 3 # T+N 天
+HUANGBAI_GC_LOOKBACK = 20  # 金叉回溯天数
+STOCK_TYPE = "main"   # "main" 或 "tech"
 
 # 绘图
 PLOT_ENABLED = True
