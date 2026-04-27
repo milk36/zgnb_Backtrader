@@ -348,7 +348,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
 
-        self.log(f"BUY  @ {self.data.close[0]:.2f}  SL={sl:.2f}")
+        self.log(f"买入  @ {self.data.close[0]:.2f}  止损={sl:.2f}")
 
     def _check_exit(self):
         idx = len(self) - 1
@@ -362,14 +362,14 @@ class HuangBaiB1Strategy(BaseStrategy):
         # --- 止损 ---
         if price <= self.stop_loss_price:
             self.order = self.order_target_percent(target=0.0)
-            self.log(f"STOP LOSS @ {price:.2f}")
+            self.log(f"止损 @ {price:.2f}")
             self._reset_position_state()
             return
 
         # --- T+3 没涨清仓 ---
         if bars_held >= self.p.t_plus_n and price <= self.buy_info["price"]:
             self.order = self.order_target_percent(target=0.0)
-            self.log(f"T+{bars_held} EXIT @ {price:.2f}")
+            self.log(f"T+{bars_held} 清仓 @ {price:.2f}")
             self._reset_position_state()
             return
 
@@ -377,7 +377,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         if self.hold_until_below_white:
             if price < self._white[idx]:
                 self.order = self.order_target_percent(target=0.0)
-                self.log(f"BELOW WHITE EXIT @ {price:.2f}")
+                self.log(f"跌破白线 @ {price:.2f}")
                 self._reset_position_state()
             return
 
@@ -386,7 +386,7 @@ class HuangBaiB1Strategy(BaseStrategy):
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
-                self.log(f"LIMIT UP SELL 1/2 @ {price:.2f}")
+                self.log(f"涨停卖半 @ {price:.2f}")
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
             return
@@ -398,7 +398,7 @@ class HuangBaiB1Strategy(BaseStrategy):
             sell_size = max(1, int(self.position.size / 3))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
-                self.log(f"MID YANG SELL 1/3 @ {price:.2f}")
+                self.log(f"中阳卖1/3 @ {price:.2f}")
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
             return

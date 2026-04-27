@@ -83,18 +83,17 @@ class PortfolioSimulator:
         self._watchlist = set()      # 周线多头股票代码集
         self._equity_curve = []      # 每日总权益
         self._trade_list = []        # 已完成交易记录
-        self._last_week_num = -1     # 上次更新观察池的 ISO 周号
+        self._last_month = (-1, -1)  # 上次更新观察池的 (year, month)
 
         # 构建交易日 → 序号映射（用于计算持仓交易日数）
         self._td_index = {td: i for i, td in enumerate(self._trading_days)}
 
         for td in self._trading_days:
-            # 周一更新观察池（ISO 周变化时触发，覆盖假期偏移）
-            week_num = td.isocalendar()[1] if hasattr(td, "isocalendar") else td.week // 7
-            year_week = (td.year, week_num)
-            if year_week != self._last_week_num:
+            # 每月首个交易日更新观察池
+            year_month = (td.year, td.month)
+            if year_month != self._last_month:
                 self._update_watchlist(td)
-                self._last_week_num = year_week
+                self._last_month = year_month
 
             # 每日卖出检查
             self._check_exits(td)
@@ -193,7 +192,7 @@ class PortfolioSimulator:
         self._positions[code] = pos
         self._cash -= total_cost
 
-        print(f"  [{date.strftime('%Y-%m-%d')}] BUY  {code}  "
+        print(f"  [{date.strftime('%Y-%m-%d')}] 买入 {code}  "
               f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
               f"缩量={score:.3f}")
 
@@ -233,20 +232,20 @@ class PortfolioSimulator:
 
             # 1. 止损
             if price <= pos.stop_loss:
-                self._sell_position(code, pos, price, date, "STOP LOSS")
+                self._sell_position(code, pos, price, date, "止损")
                 to_remove.append(code)
                 continue
 
             # 2. T+N 没涨清仓
             if days_held >= self._t_plus_n and price <= pos.buy_price:
-                self._sell_position(code, pos, price, date, f"T+{days_held}")
+                self._sell_position(code, pos, price, date, f"T+{days_held}清仓")
                 to_remove.append(code)
                 continue
 
             # 3. 持股至跌破白线（优先级高于4、5）
             if pos.hold_until_below_white:
                 if price < white_val:
-                    self._sell_position(code, pos, price, date, "BELOW WHITE")
+                    self._sell_position(code, pos, price, date, "跌破白线")
                     to_remove.append(code)
                 continue
 
@@ -254,7 +253,7 @@ class PortfolioSimulator:
             if price >= high * 0.995:
                 sell_size = max(1, pos.size // 2)
                 if sell_size < pos.size:
-                    self._sell_partial(code, pos, sell_size, price, date, "LIMIT UP 1/2")
+                    self._sell_partial(code, pos, sell_size, price, date, "涨停卖半")
                     if pos.size <= pos.initial_size // 2:
                         pos.hold_until_below_white = True
                 continue
@@ -265,7 +264,7 @@ class PortfolioSimulator:
             if pct_gain >= mid_yang:
                 sell_size = max(1, pos.size // 3)
                 if sell_size < pos.size:
-                    self._sell_partial(code, pos, sell_size, price, date, "MID YANG 1/3")
+                    self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
                     if pos.size <= pos.initial_size // 2:
                         pos.hold_until_below_white = True
 
@@ -287,7 +286,7 @@ class PortfolioSimulator:
             "pnl_pct": pnl,
             "reason": reason,
         })
-        print(f"  [{date.strftime('%Y-%m-%d')}] SELL {code}  "
+        print(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
               f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}")
 
     def _sell_partial(self, code, pos, sell_size, price, date, reason):
@@ -295,7 +294,7 @@ class PortfolioSimulator:
         proceeds = sell_size * price * (1 - self._commission)
         self._cash += proceeds
         pos.size -= sell_size
-        print(f"  [{date.strftime('%Y-%m-%d')}] SELL {code}  "
+        print(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
               f"部分 {sell_size}股  价格={price:.2f}  {reason}")
 
     def _calc_equity(self, date):
