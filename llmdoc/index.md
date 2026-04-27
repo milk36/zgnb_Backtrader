@@ -6,7 +6,9 @@
 - [数据层：通达信数据馈送](feature/data-tdx-feed.md): TdxDataFeed 类的设计，mootdx Reader 封装，数据标准化流程（列名映射、日期索引、裁剪）。涉及数据获取与处理时参考。
 - [指标层：KDJ 指标](feature/indicator-kdj.md): KDJIndicator 自定义指标的实现，MyTT 批量计算模式，通达信标准 KDJ 公式（SMA 而非 EMA）。开发新指标时参考此模式。
 - [策略层：基类与 KDJ 金叉策略](feature/strategy-layer.md): BaseStrategy 模板基类的交易逻辑（停牌/涨跌停过滤、订单管理）与 KDJCrossStrategy 信号规则。开发新策略时必读。
+- [策略层：黄白线金叉后B1策略](feature/strategy-huangbai-b1.md): HuangBaiB1Strategy 的完整设计——周线多头过滤、黄白线金叉检测、7种B1买入子条件、分层止盈止损与分批卖出逻辑。日志输出含股票代码与三级过滤结果。理解该策略或开发类似复杂策略时参考。
 - [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装，分析器配置（SharpeRatio/DrawDown/Returns/TradeAnalyzer），报告输出格式。理解回测执行流程时参考。
+- [扫描层：全市场选股扫描器](feature/scanner-market-scan.md): 独立于 Backtrader 的全市场选股模块。直接用 MyTT 计算 B1 策略三级过滤，对全部 A 股扫描并按缩量评分排序。涉及选股扫描或 CLI --scan 模式时参考。
 
 ## SOP Documents
 
