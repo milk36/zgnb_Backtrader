@@ -70,7 +70,14 @@
 
 `_compute_signals()` 与 `HuangBaiB1Strategy.indicators()` 的 B1 逻辑是手动同步的纯 NumPy/MyTT 复刻版本，策略指标变更时需同步更新此函数。
 
-CLI 入口：`python main.py --scan`（不进入回测流程，不需要 `--symbol`）。`--scan --stock-type tech` 仅创业板风格参数。
+CLI 入口：
+
+- `python main.py --strategy huangbai --scan` — 全市场扫描 + 自动回测（两阶段流程）
+- `python main.py --strategy huangbai --scan-only` — 仅扫描选股，不进入回测
+- `python main.py --strategy huangbai --symbol 002475` — 指定股票回测
+- `--stock-type main/tech` 切换主板/创业板振幅参数
+
+两阶段流程：Phase 1 调用 `scan_all()` 扫描全部 A 股得到候选列表 → Phase 2 对每只候选股独立运行 `Backtester` 回测 → 汇总输出平均收益、总交易数、胜负比。
 
 ## 3. Relevant Code Modules
 
@@ -78,7 +85,7 @@ CLI 入口：`python main.py --scan`（不进入回测流程，不需要 `--symb
 - `src/strategies/base_strategy.py` - 基类（停牌/涨跌停过滤、订单管理）
 - `src/indicators/kdj_indicator.py` - KDJ指标（提供J值用于B1条件）
 - `config.py` - HUANGBAI_* 系列参数、TDX_DIR/TDX_MARKET 配置
-- `main.py` - `--strategy huangbai --stock-type main/tech` 入口；`--scan` 模式调用 `scan_all()`
+- `main.py` - 统一 CLI 入口：`--strategy huangbai --scan` 全市场扫描+回测、`--scan-only` 仅扫描、`--symbol` 指定股票回测；`--stock-type main/tech` 切换板块参数
 
 ## 4. Attention
 
