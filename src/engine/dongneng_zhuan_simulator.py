@@ -3,9 +3,11 @@
 交易规则：
 - 总资金10万，单只最多5万，最多持仓2只
 - 信号日T检测 → T+1开盘价买入
-- 止损：买入K线最低价
-- 2日不拉升（价格<=买入价）清仓
-- 脱离成本5%以上，持仓最多4-6天
+- 四级退出（优先级从高到低）：
+  1. 止损：买入K线最低价
+  2. 涨停清仓：当日最高触及涨停价即清仓
+  3. 2日不拉升（价格<=买入价）清仓
+  4. 脱离成本5%以上，持仓最多4-6天
 - 按"下大上小"排名取前N只买入
 """
 
@@ -261,7 +263,21 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 2. T+N不拉升清仓
+            # 2. 涨停立即清仓
+            if idx >= 1:
+                prev_close = sig["close"][idx - 1]
+                if prev_close > 0:
+                    is_tech = code[:2] in ("30", "68")
+                    limit_pct = 1.20 if is_tech else 1.10
+                    limit_up_price = round(prev_close * limit_pct, 2)
+                    if sig["high"][idx] >= limit_up_price:
+                        self._cooldown[code] = cur_idx
+                        self._sell_position(code, pos, price, date,
+                                            f"涨停清仓(盈利{pct_gain:.1f}%)")
+                        to_remove.append(code)
+                        continue
+
+            # 3. T+N不拉升清仓
             if days_held >= self._t_plus_n and price <= pos.buy_price:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, price, date,
@@ -269,7 +285,7 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. 脱离成本 profit_pct% 以上，持仓最多 max_hold_days 天
+            # 4. 脱离成本 profit_pct% 以上，持仓最多 max_hold_days 天
             if pct_gain >= self._profit_pct and days_held >= self._max_hold_days:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, price, date,
