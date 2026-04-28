@@ -98,6 +98,8 @@ CLI 入口：
 - `python main.py --strategy huangbai --symbol 002475` — 指定股票回测
 - `--stock-type main/tech` 切换主板/创业板振幅参数
 
+完整 CLI 参数说明见 [CLI 使用指南](feature/cli-usage.md)
+
 ## 3. Relevant Code Modules
 
 - `src/strategies/huangbai_b1_strategy.py` - 策略主文件（HuangBaiB1Strategy类、扫描函数、组合级预加载函数）

@@ -153,6 +153,8 @@ python main.py --strategy my --symbol 600036
 
 如果 MyTT 内置指标不满足需求，可在 `src/indicators/` 下参照 `kdj_indicator.py` 的模式创建：`__init__` 中用 MyTT 批量计算完整数组，`next()` 中按索引取值。
 
+> 完整的 CLI 参数说明与命令示例，请参阅 [CLI 使用指南](llmdoc/feature/cli-usage.md)。
+
 ## 内置策略说明
 
 ### KDJ 金叉/死叉策略
