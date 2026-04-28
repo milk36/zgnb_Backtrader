@@ -437,6 +437,9 @@ class PortfolioSimulator:
             "pnl_pct": pnl,
             "pnl_amount": pnl_amount,
             "reason": reason,
+            "stop_loss": pos.stop_loss,
+            "white_at_buy": pos.white_at_buy,
+            "yellow_at_buy": pos.yellow_at_buy,
         })
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 清仓 {code}  "
                   f"价格={price:.2f}  "
