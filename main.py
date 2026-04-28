@@ -126,7 +126,7 @@ def main():
             log_dir=LOG_DIR)
         sim.run()
         report = sim.report()
-        PortfolioSimulator.print_report(report, log_file=sim._log_file)
+        PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1]")
         return
 
     # ---- huangbai_v2 策略：组合级模拟（含大盘MACD过滤） ----
@@ -168,7 +168,7 @@ def main():
             market_macd_bullish=market_macd_bullish)
         sim.run()
         report = sim.report()
-        PortfolioSimulator.print_report(report, log_file=sim._log_file)
+        PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V2]")
         return
 
     # ---- huangbai 策略：全市场扫描 + 回测 ----

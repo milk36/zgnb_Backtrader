@@ -55,6 +55,7 @@ class PortfolioSimulator:
         self._stock_type = stock_type
         self._t_plus_n = t_plus_n
         self._market_macd_bullish = market_macd_bullish  # np.array[bool] 或 None
+        self._strategy_tag = "[B1V2]" if market_macd_bullish is not None else "[B1]"
         if market_macd_bullish is not None and len(market_macd_bullish) != len(trading_days):
             raise ValueError(
                 f"market_macd_bullish 长度({len(market_macd_bullish)})与 "
@@ -115,9 +116,9 @@ class PortfolioSimulator:
             last = self._trading_days[-1]
             years = pd.Series(self._trading_days.year).value_counts().sort_index()
             year_info = "  ".join(f"{y}年:{c}天" for y, c in years.items())
-            self._log(f"  交易日历: {first.strftime('%Y-%m-%d')} ~ {last.strftime('%Y-%m-%d')}  "
+            self._log(f"  {self._strategy_tag} 交易日历: {first.strftime('%Y-%m-%d')} ~ {last.strftime('%Y-%m-%d')}  "
                       f"共{len(self._trading_days)}天  [{year_info}]")
-            self._log(f"  日志文件: {self._log_path}")
+            self._log(f"  {self._strategy_tag} 日志文件: {self._log_path}")
 
         # 构建交易日 → 序号映射（用于计算持仓交易日数）
         self._td_index = {td: i for i, td in enumerate(self._trading_days)}
@@ -128,7 +129,7 @@ class PortfolioSimulator:
             if year_month != self._last_month:
                 self._update_watchlist(td)
                 self._last_month = year_month
-                self._log(f"  [{td.strftime('%Y-%m-%d')}] 月度更新观察池: {len(self._watchlist)} 只")
+                self._log(f"  [{td.strftime('%Y-%m-%d')}] {self._strategy_tag} 月度更新观察池: {len(self._watchlist)} 只")
 
             # 每日卖出检查
             self._check_exits(td)
@@ -247,7 +248,7 @@ class PortfolioSimulator:
         self._positions[code] = pos
         self._cash -= total_cost
 
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] 买入 {code}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 买入 {code}  "
                   f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
                   f"缩量={score:.3f}  "
                   f"持仓={len(self._positions)}/{self._max_positions}  "
@@ -377,7 +378,7 @@ class PortfolioSimulator:
             "pnl_pct": pnl,
             "reason": reason,
         })
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
                   f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}  "
                   f"持仓={len(self._positions)-1}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
@@ -385,10 +386,11 @@ class PortfolioSimulator:
     def _sell_partial(self, code, pos, sell_size, price, date, reason):
         """部分卖出"""
         proceeds = sell_size * price * (1 - self._commission)
+        pnl = (price - pos.buy_price) / pos.buy_price * 100
         self._cash += proceeds
         pos.size -= sell_size
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
-                  f"部分 {sell_size}股→剩余{pos.size}股  价格={price:.2f}  {reason}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
+                  f"部分 {sell_size}股→剩余{pos.size}股  价格={price:.2f}  盈亏={pnl:+.2f}%  {reason}  "
                   f"持仓={len(self._positions)}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
 
@@ -452,7 +454,7 @@ class PortfolioSimulator:
         }
 
     @staticmethod
-    def print_report(report, log_file=None):
+    def print_report(report, log_file=None, strategy_tag="[B1]"):
         """打印回测报告（同时写入日志文件）"""
         def _out(msg):
             print(msg)
@@ -461,7 +463,7 @@ class PortfolioSimulator:
                 log_file.flush()
 
         _out(f"\n{'=' * 55}")
-        _out(f"          组合回测报告")
+        _out(f"          {strategy_tag} 组合回测报告")
         _out(f"{'=' * 55}")
         _out(f"  回测区间:    {report['trading_days']} 个交易日")
         _out(f"  初始资金:    {report['initial_cash']:>12,.2f}")
@@ -483,11 +485,11 @@ class PortfolioSimulator:
         if total > 0:
             _out(f"  胜率:        {won / total * 100:>11.2f}%")
 
-        # 交易明细（最近20笔）
+        # 交易明细（全部）
         trades = report["trade_list"]
         if trades:
             _out(f"\n  --- 交易明细 (共 {len(trades)} 笔) ---")
-            for t in trades[-20:]:
+            for t in trades:
                 bd = t["buy_date"].strftime("%Y-%m-%d") if hasattr(t["buy_date"], "strftime") else str(t["buy_date"])
                 sd = t["sell_date"].strftime("%Y-%m-%d") if hasattr(t["sell_date"], "strftime") else str(t["sell_date"])
                 _out(f"  {t['code']}  {bd}→{sd}  "

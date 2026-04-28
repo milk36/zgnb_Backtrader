@@ -448,7 +448,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         if price <= self.stop_loss_price:
             self.order = self.order_target_percent(target=0.0)
             self._last_sl_bar = len(self)
-            self.log(f"止损 @ {price:.2f}")
+            self.log(f"止损 @ {price:.2f}  亏损={pct_gain:+.2f}%")
             self._reset_position_state()
             return
 
@@ -456,7 +456,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         if bars_held >= self.p.t_plus_n and price <= self.buy_info["price"]:
             self.order = self.order_target_percent(target=0.0)
             self._last_sl_bar = len(self)
-            self.log(f"T+{bars_held} 清仓 @ {price:.2f}")
+            self.log(f"T+{bars_held} 清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
             self._reset_position_state()
             return
 
@@ -464,7 +464,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         if pct_gain >= 100:
             self.order = self.order_target_percent(target=0.0)
             self._last_sl_bar = len(self)
-            self.log(f"盈利100%清仓 @ {price:.2f}")
+            self.log(f"盈利100%清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
             self._reset_position_state()
             return
 
@@ -474,13 +474,13 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                 if price <= self.buy_info["price"]:
                     self.order = self.order_target_percent(target=0.0)
                     self._last_sl_bar = len(self)
-                    self.log(f"半仓盈转亏清仓 @ {price:.2f}")
+                    self.log(f"半仓盈转亏清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     self._reset_position_state()
             else:
                 if price < white_val:
                     self.order = self.order_target_percent(target=0.0)
                     self._last_sl_bar = len(self)
-                    self.log(f"半仓跌破白线 @ {price:.2f}")
+                    self.log(f"半仓跌破白线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     self._reset_position_state()
             return
 
@@ -493,7 +493,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
-                self.log(f"涨停卖半 @ {price:.2f}")
+                self.log(f"涨停卖半 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
             return
@@ -504,7 +504,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
                 self._mid_yang_triggered = True
-                self.log(f"中阳卖1/3 @ {price:.2f}")
+                self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
             return
@@ -519,7 +519,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         if self.p.print_log:
             dt = dt or self.data.datetime.date(0)
             sym = self.data._name or "?"
-            print(f"[{dt.isoformat()}] {sym}  {txt}")
+            print(f"[{dt.isoformat()}] {sym}  [B1V2] {txt}")
 
     def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok=True):
         sym = self.data._name or "?"
@@ -534,7 +534,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             return
 
         tag = " <<< SELECT" if all_pass else ""
-        print(f"[{dt.isoformat()}] {sym}  大盘={m}  周线={w}  金叉={g}  B1={b}  "
+        print(f"[{dt.isoformat()}] {sym}  [B1V2] 大盘={m}  周线={w}  金叉={g}  B1={b}  "
               f"C={self.data.close[0]:.2f}  "
               f"J={self.kdj._j[idx]:.1f}  RSI={self._rsi[idx]:.1f}"
               f"{tag}")
