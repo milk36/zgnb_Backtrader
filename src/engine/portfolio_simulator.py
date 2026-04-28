@@ -44,7 +44,8 @@ class PortfolioSimulator:
     def __init__(self, all_signals, trading_days,
                  initial_cash=1_000_000, max_positions=10,
                  per_position_cash=100_000, commission=0.0003,
-                 stock_type="main", t_plus_n=3, log_dir="logs"):
+                 stock_type="main", t_plus_n=3, log_dir="logs",
+                 market_macd_bullish=None):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._initial_cash = initial_cash
@@ -53,6 +54,11 @@ class PortfolioSimulator:
         self._commission = commission
         self._stock_type = stock_type
         self._t_plus_n = t_plus_n
+        self._market_macd_bullish = market_macd_bullish  # np.array[bool] 或 None
+        if market_macd_bullish is not None and len(market_macd_bullish) != len(trading_days):
+            raise ValueError(
+                f"market_macd_bullish 长度({len(market_macd_bullish)})与 "
+                f"trading_days 长度({len(trading_days)})不匹配")
 
         # 日志文件（追加模式）
         os.makedirs(log_dir, exist_ok=True)
@@ -163,6 +169,12 @@ class PortfolioSimulator:
             return
         if self._cash < self._per_position_cash * 0.5:
             return
+
+        # V2: 大盘MACD过滤 — 空头时只卖不买
+        if self._market_macd_bullish is not None:
+            td_idx = self._td_index.get(date)
+            if td_idx is not None and not self._market_macd_bullish[td_idx]:
+                return
 
         candidates = []
         cur_idx = self._td_index.get(date, 0)

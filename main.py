@@ -20,15 +20,18 @@ from config import (
     PORTFOLIO_MAX_POSITIONS,
     PORTFOLIO_PER_POSITION,
     LOG_DIR,
+    MARKET_INDEX_CODE,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
 from src.strategies.kdj_cross_strategy import KDJCrossStrategy
 from src.strategies.huangbai_b1_strategy import HuangBaiB1Strategy, scan_all
+from src.strategies.huangbai_b1_v2_strategy import HuangBaiB1V2Strategy, scan_all as scan_all_v2
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
     "huangbai": HuangBaiB1Strategy,
+    "huangbai_v2": HuangBaiB1V2Strategy,
 }
 
 
@@ -47,8 +50,10 @@ def parse_args():
     return parser.parse_args()
 
 
-def _run_backtest(symbols, args):
+def _run_backtest(symbols, args, strategy_cls=None):
     """对指定股票列表运行回测，返回汇总报告"""
+    if strategy_cls is None:
+        strategy_cls = STRATEGIES[args.strategy]
     feed_provider = TdxDataFeed()
     total_return = 0
     total_trades = 0
@@ -62,7 +67,7 @@ def _run_backtest(symbols, args):
             backtester = Backtester(cash=args.cash, commission=COMMISSION)
             feed = feed_provider.get_feed(symbol, start=args.start, end=args.end)
             backtester.add_feed(feed, name=symbol)
-            backtester.add_strategy(HuangBaiB1Strategy, stock_type=args.stock_type)
+            backtester.add_strategy(strategy_cls, stock_type=args.stock_type)
             report = backtester.run()
             Backtester.print_report(report)
             total_return += report["total_return"]
@@ -124,6 +129,48 @@ def main():
         PortfolioSimulator.print_report(report, log_file=sim._log_file)
         return
 
+    # ---- huangbai_v2 策略：组合级模拟（含大盘MACD过滤） ----
+    if strategy_cls == HuangBaiB1V2Strategy and args.portfolio:
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.huangbai_b1_v2_strategy import preload_all_signals as preload_v2
+
+        print("=" * 55)
+        print("  V2: 周线多头 + 大盘MACD + 黄白线金叉 + B1")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days, market_macd_bullish = preload_v2(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: V2组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
+              f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
+              f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PORTFOLIO_INITIAL_CASH,
+            max_positions=PORTFOLIO_MAX_POSITIONS,
+            per_position_cash=PORTFOLIO_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file)
+        return
+
     # ---- huangbai 策略：全市场扫描 + 回测 ----
     if strategy_cls == HuangBaiB1Strategy and (args.scan or args.symbol is None):
         print("=" * 55)
@@ -146,6 +193,28 @@ def main():
         _run_backtest(codes, args)
         return
 
+    # ---- huangbai_v2 策略：全市场扫描 + 回测 ----
+    if strategy_cls == HuangBaiB1V2Strategy and (args.scan or args.symbol is None):
+        print("=" * 55)
+        print("  V2: 全市场选股扫描（含大盘MACD过滤）")
+        print("=" * 55)
+        results, market_macd_ok = scan_all_v2(stock_type=args.stock_type)
+
+        if args.scan_only:
+            return
+
+        if not results or not market_macd_ok:
+            print("\n无符合条件的股票或大盘MACD空头，回测终止。")
+            return
+
+        codes = [r["code"] for r in results]
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: 对 {len(codes)} 只选股结果执行回测")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"{'=' * 55}")
+        _run_backtest(codes, args)
+        return
+
     # ---- 指定股票回测 ----
     symbols = args.symbol or DEFAULT_STOCKS
     feed_provider = TdxDataFeed()
@@ -156,6 +225,18 @@ def main():
         backtester.add_feed(feed, name=symbol)
 
     if strategy_cls == HuangBaiB1Strategy:
+        backtester.add_strategy(strategy_cls, stock_type=args.stock_type)
+    elif strategy_cls == HuangBaiB1V2Strategy:
+        # V2: 加载大盘指数数据作为第二数据源
+        try:
+            market_feed = feed_provider.get_feed(
+                MARKET_INDEX_CODE, start=args.start, end=args.end)
+            if market_feed is not None:
+                backtester.add_feed(market_feed, name=MARKET_INDEX_CODE)
+            else:
+                print(f"  警告: 无法加载大盘指数({MARKET_INDEX_CODE})数据，大盘MACD过滤将被跳过")
+        except Exception as e:
+            print(f"  警告: 加载大盘指数数据失败({e})，大盘MACD过滤将被跳过")
         backtester.add_strategy(strategy_cls, stock_type=args.stock_type)
     else:
         backtester.add_strategy(strategy_cls)

@@ -21,7 +21,7 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj`（KDJ 金叉死叉）/ `huangbai`（黄白线 B1） |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj`（KDJ 金叉死叉）/ `huangbai`（黄白线 B1）/ `huangbai_v2`（黄白线 B1 + 大盘MACD过滤） |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -64,12 +64,25 @@ python main.py --strategy kdj --symbol 600036
 
 # 自定义资金回测
 python main.py --symbol 600036 --cash 500000
+
+# V2 策略：组合级模拟（含大盘MACD过滤）
+python main.py --strategy huangbai_v2 --portfolio
+
+# V2 策略：全市场扫描
+python main.py --strategy huangbai_v2 --scan
+
+# V2 策略：仅扫描选股
+python main.py --strategy huangbai_v2 --scan-only
+
+# V2 策略：指定股票回测（自动加载大盘指数数据）
+python main.py --strategy huangbai_v2 --symbol 002475
 ```
 
 ### 参数与策略行为的关系
 
 - **`--stock-type`**：影响振幅阈值（主板 5% / 科创板 8%）、中阳判断（主板 5% / 科创板 10%）、涨停板计算（主板 10% / 科创板 20%）
-- **`--portfolio`**：资金/仓位参数来自 `config.py`（`PORTFOLIO_INITIAL_CASH=100万`、`PORTFOLIO_MAX_POSITIONS=10`、`PORTFOLIO_PER_POSITION=10万`），不受 `--cash` 影响
+- **`--portfolio`**：资金/仓位参数来自 `config.py`（`PORTFOLIO_INITIAL_CASH=100万`、`PORTFOLIO_MAX_POSITIONS=10`、`PORTFOLIO_PER_POSITION=10万`），不受 `--cash` 影响。对 `huangbai` 和 `huangbai_v2` 均生效
+- **`huangbai_v2` 大盘MACD**：V2 策略自动加载上证指数数据计算 MACD。组合模拟模式下空头日只卖不买；单股回测中大盘数据作为第二数据源；扫描模式下大盘空头时返回空结果
 - **`--cash`**：仅在非组合模式下控制单股回测初始资金
 - **`--start / --end`**：所有模式通用。组合模拟模式下用于截取交易日历和信号数据范围；扫描模式下 `--start / --end` 不影响扫描（扫描始终取最新 bar），仅影响后续逐只回测区间
 - **`--no-plot`**：仅指定股票回测模式有效，组合模拟和扫描模式无绘图
@@ -84,5 +97,5 @@ python main.py --symbol 600036 --cash 500000
 - `--strategy huangbai` 为默认策略，命令行中可省略
 - `--scan` 与 `--symbol` 互斥：`--scan` 优先级更高，会忽略 `--symbol`
 - `--scan-only` 隐含 `--scan`，不需要同时指定两者
-- `--portfolio` 仅对 `huangbai` 策略生效（`main.py` 中硬编码判断 `strategy_cls == HuangBaiB1Strategy`）
+- `--portfolio` 对 `huangbai` 和 `huangbai_v2` 均生效（`main.py` 分别判断 `HuangBaiB1Strategy` 和 `HuangBaiB1V2Strategy`）
 - 组合模拟分两阶段执行：阶段 1 预加载全市场信号（约 55 秒），阶段 2 逐日模拟
