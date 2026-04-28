@@ -57,6 +57,7 @@ def parse_args():
     parser.add_argument("--scan-only", action="store_true", help="仅扫描选股，不回测")
     parser.add_argument("--no-plot", action="store_true", help="禁用绘图")
     parser.add_argument("--portfolio", action="store_true", help="组合级模拟（正确的时间序列模拟）")
+    parser.add_argument("--chart", action="store_true", help="生成交易K线图（保存到charts/目录）")
     return parser.parse_args()
 
 
@@ -227,9 +228,11 @@ def main():
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V2]")
-        return
 
-    # ---- huangbai_v3 策略：组合级模拟（通达信B1 + 中阳优先止盈） ----
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals)
+        return
     if strategy_cls == HuangBaiB1V3Strategy and args.portfolio:
         from src.engine.portfolio_simulator import PortfolioSimulator
         from src.strategies.huangbai_b1_v3_strategy import preload_all_signals as preload_v3

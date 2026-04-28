@@ -1053,9 +1053,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "stock_macd_bullish": stock_macd_bullish,
         "white": white,
         "yellow": yellow,
+        "bbi": bbi,
         "close": C,
         "high": H,
         "low": L,
+        "open": O,
+        "volume": V,
         "dates": dates,
     }
 

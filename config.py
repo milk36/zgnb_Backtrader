@@ -60,3 +60,4 @@ LOG_DIR = "logs"
 
 # 绘图
 PLOT_ENABLED = True
+CHART_OUTPUT_DIR = "charts"
