@@ -468,7 +468,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
-        # 4. 半仓持股模式
+        # 4. 半仓持股模式（仅涨停可卖1/2，中阳不再触发）
         if self.hold_until_below_white:
             if pct_gain <= 20:
                 if price <= self.buy_info["price"]:
@@ -476,16 +476,17 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     self._last_sl_bar = len(self)
                     self.log(f"半仓盈转亏清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     self._reset_position_state()
+                    return
             else:
                 if price < white_val:
                     self.order = self.order_target_percent(target=0.0)
                     self._last_sl_bar = len(self)
                     self.log(f"半仓跌破白线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     self._reset_position_state()
-            return
+                    return
+            # 未清仓：继续检查涨停卖1/2
 
-        # 5. 涨停卖1/2
-        mid_yang = 10 if self.p.stock_type == "tech" else 5
+        # 5. 涨停卖1/2（半仓模式下仍可触发）
         limit_pct = 1.20 if self.p.stock_type == "tech" else 1.10
         prev_close = self.data.close[-1]
         limit_up_price = round(prev_close * limit_pct, 2)
@@ -498,16 +499,18 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     self.hold_until_below_white = True
             return
 
-        # 6. 中阳卖1/3
-        if pct_gain >= mid_yang:
-            sell_size = max(1, int(self.position.size / 3))
-            if sell_size < self.position.size:
-                self.order = self.sell(size=sell_size)
-                self._mid_yang_triggered = True
-                self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
-                if self.position.size - sell_size <= self.initial_size / 2:
-                    self.hold_until_below_white = True
-            return
+        # 6. 中阳卖1/3（半仓模式下不触发）
+        if not self.hold_until_below_white:
+            mid_yang = 10 if self.p.stock_type == "tech" else 5
+            if pct_gain >= mid_yang:
+                sell_size = max(1, int(self.position.size / 3))
+                if sell_size < self.position.size:
+                    self.order = self.sell(size=sell_size)
+                    self._mid_yang_triggered = True
+                    self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                    if self.position.size - sell_size <= self.initial_size / 2:
+                        self.hold_until_below_white = True
+                return
 
     def _reset_position_state(self):
         self.buy_info = None
