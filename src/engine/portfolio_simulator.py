@@ -288,7 +288,13 @@ class PortfolioSimulator:
                 bars_held = (date - pos.buy_date).days
             days_held = bars_held
 
+            # 计算摊薄成本价（扣除部分卖出回款后的真实成本）
+            total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+            remaining_cost = total_cost - pos.partial_proceeds
+            avg_cost = remaining_cost / pos.size if pos.size > 0 else pos.buy_price
+
             pct_gain = (price - pos.buy_price) / pos.buy_price * 100
+            real_gain = (price - avg_cost) / avg_cost * 100
 
             # 1. 止损
             if price <= pos.stop_loss:
@@ -299,8 +305,8 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 2. T+N 没涨清仓
-            if days_held >= self._t_plus_n and price <= pos.buy_price:
+            # 2. T+N 没涨清仓（基于摊薄成本价判断）
+            if days_held >= self._t_plus_n and price <= avg_cost:
                 cur_idx = self._td_index.get(date)
                 if cur_idx is not None:
                     self._cooldown[code] = cur_idx
@@ -320,8 +326,8 @@ class PortfolioSimulator:
             # 4. 半仓持股模式
             if pos.hold_until_below_white:
                 if pct_gain <= 20:
-                    # 盈利20%以内：盈转亏清仓
-                    if price <= pos.buy_price:
+                    # 盈利20%以内：盈转亏清仓（基于摊薄成本价判断）
+                    if price <= avg_cost:
                         cur_idx = self._td_index.get(date)
                         if cur_idx is not None:
                             self._cooldown[code] = cur_idx
