@@ -46,7 +46,7 @@ class PortfolioSimulator:
                  initial_cash=1_000_000, max_positions=10,
                  per_position_cash=100_000, commission=0.0003,
                  stock_type="main", t_plus_n=3, log_dir="logs",
-                 market_macd_bullish=None):
+                 market_macd_bullish=None, strategy_tag=None):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._initial_cash = initial_cash
@@ -56,7 +56,12 @@ class PortfolioSimulator:
         self._stock_type = stock_type
         self._t_plus_n = t_plus_n
         self._market_macd_bullish = market_macd_bullish  # np.array[bool] 或 None
-        self._strategy_tag = "[B1V2]" if market_macd_bullish is not None else "[B1]"
+        if strategy_tag:
+            self._strategy_tag = strategy_tag
+        elif market_macd_bullish is not None:
+            self._strategy_tag = "[B1V2]"
+        else:
+            self._strategy_tag = "[B1]"
         if market_macd_bullish is not None and len(market_macd_bullish) != len(trading_days):
             raise ValueError(
                 f"market_macd_bullish 长度({len(market_macd_bullish)})与 "
