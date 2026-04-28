@@ -359,6 +359,7 @@ class HuangBaiB1Strategy(BaseStrategy):
     def _check_exit(self):
         idx = len(self) - 1
         price = self.data.close[0]
+        high = self.data.high[0]
         white_val = self._white[idx]
         bars_held = len(self) - self.buy_info["bar"]
 
@@ -411,7 +412,10 @@ class HuangBaiB1Strategy(BaseStrategy):
 
         # --- 5. 涨停卖1/2（中阳未触发时才触发） ---
         mid_yang = 10 if self.p.stock_type == "tech" else 5
-        if not self._mid_yang_triggered and price >= self.data.high[0] * 0.995:
+        limit_pct = 1.20 if self.p.stock_type == "tech" else 1.10
+        prev_close = self.data.close[-1]
+        limit_up_price = round(prev_close * limit_pct, 2)
+        if not self._mid_yang_triggered and high >= limit_up_price:
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)

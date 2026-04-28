@@ -165,9 +165,15 @@ class PortfolioSimulator:
             return
 
         candidates = []
+        cur_idx = self._td_index.get(date, 0)
         for code in self._watchlist:
             if code in self._positions:
                 continue
+            if code in self._cooldown:
+                if cur_idx - self._cooldown[code] < 10:
+                    continue
+                else:
+                    del self._cooldown[code]
             sig = self._all_signals[code]
             idx = self._find_bar_index(code, date)
             if idx is None or idx < 1:
@@ -231,7 +237,9 @@ class PortfolioSimulator:
 
         self._log(f"  [{date.strftime('%Y-%m-%d')}] 买入 {code}  "
                   f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
-                  f"缩量={score:.3f}")
+                  f"缩量={score:.3f}  "
+                  f"持仓={len(self._positions)}/{self._max_positions}  "
+                  f"现金={self._cash:,.0f}")
 
     def _check_exits(self, date):
         """检查所有持仓的卖出条件"""
@@ -316,13 +324,18 @@ class PortfolioSimulator:
                 continue
 
             # 5. 涨停卖1/2（中阳未触发时才触发）
-            if not pos.mid_yang_triggered and price >= high * 0.995:
-                sell_size = max(1, pos.size // 2)
-                if sell_size < pos.size:
-                    self._sell_partial(code, pos, sell_size, price, date, "涨停卖半")
-                    if pos.size <= pos.initial_size // 2:
-                        pos.hold_until_below_white = True
-                continue
+            if idx >= 1 and not pos.mid_yang_triggered:
+                prev_close = sig["close"][idx - 1]
+                if prev_close > 0:
+                    limit_pct = 1.20 if self._stock_type == "tech" else 1.10
+                    limit_up_price = round(prev_close * limit_pct, 2)
+                    if high >= limit_up_price:
+                        sell_size = max(1, pos.size // 2)
+                        if sell_size < pos.size:
+                            self._sell_partial(code, pos, sell_size, price, date, "涨停卖半")
+                            if pos.size <= pos.initial_size // 2:
+                                pos.hold_until_below_white = True
+                        continue
 
             # 6. 中阳卖1/3
             mid_yang = 10 if self._stock_type == "tech" else 5
@@ -353,7 +366,9 @@ class PortfolioSimulator:
             "reason": reason,
         })
         self._log(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
-                  f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}")
+                  f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}  "
+                  f"持仓={len(self._positions)-1}/{self._max_positions}  "
+                  f"现金={self._cash:,.0f}")
 
     def _sell_partial(self, code, pos, sell_size, price, date, reason):
         """部分卖出"""
@@ -361,7 +376,9 @@ class PortfolioSimulator:
         self._cash += proceeds
         pos.size -= sell_size
         self._log(f"  [{date.strftime('%Y-%m-%d')}] 卖出 {code}  "
-                  f"部分 {sell_size}股  价格={price:.2f}  {reason}")
+                  f"部分 {sell_size}股→剩余{pos.size}股  价格={price:.2f}  {reason}  "
+                  f"持仓={len(self._positions)}/{self._max_positions}  "
+                  f"现金={self._cash:,.0f}")
 
     def _calc_equity(self, date):
         """计算当日总权益 = 现金 + 持仓市值"""

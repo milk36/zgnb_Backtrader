@@ -37,7 +37,14 @@ class BaseStrategy(bt.Strategy):
         return self.data.volume[0] == 0
 
     def is_limit_up(self) -> bool:
-        return self.data.close[0] >= self.data.high[0] * 0.995
+        if len(self) < 2:
+            return False
+        prev_close = self.data.close[-1]
+        if prev_close <= 0:
+            return False
+        limit_pct = 1.10  # 默认主板10%
+        limit_up_price = round(prev_close * limit_pct, 2)
+        return self.data.high[0] >= limit_up_price
 
     def is_limit_down(self) -> bool:
         return self.data.close[0] <= self.data.low[0] * 1.005
