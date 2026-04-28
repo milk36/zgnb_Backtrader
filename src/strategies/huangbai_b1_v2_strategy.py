@@ -486,11 +486,11 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     return
             # 未清仓：继续检查涨停卖1/2
 
-        # 5. 涨停卖1/2（半仓模式下仍可触发）
+        # 5. 涨停卖1/2（半仓模式下仍可触发，不受中阳标记限制）
         limit_pct = 1.20 if self.p.stock_type == "tech" else 1.10
         prev_close = self.data.close[-1]
         limit_up_price = round(prev_close * limit_pct, 2)
-        if not self._mid_yang_triggered and high >= limit_up_price:
+        if high >= limit_up_price:
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)

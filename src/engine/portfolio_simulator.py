@@ -348,8 +348,8 @@ class PortfolioSimulator:
                     continue
                 # 未清仓：仍允许涨停卖1/2，但跳过中阳
 
-            # 5. 涨停卖1/2（半仓模式下仍可触发）
-            if idx >= 1 and not pos.mid_yang_triggered:
+            # 5. 涨停卖1/2（半仓模式下仍可触发，不受中阳标记限制）
+            if idx >= 1:
                 prev_close = sig["close"][idx - 1]
                 if prev_close > 0:
                     limit_pct = 1.20 if self._stock_type == "tech" else 1.10
@@ -401,7 +401,7 @@ class PortfolioSimulator:
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 清仓 {code}  "
                   f"价格={price:.2f}  "
                   f"成本价 {pos.buy_price:.2f}→{avg_cost:.2f}  "
-                  f"成本={total_cost:,.0f}  回款={total_proceeds:,.0f}  "
+                  f"总成本={total_cost:,.0f}  累计回款={total_proceeds:,.0f}  "
                   f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  {reason}  "
                   f"持仓={len(self._positions)-1}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
@@ -414,13 +414,12 @@ class PortfolioSimulator:
         self._cash += proceeds
         pos.partial_proceeds += proceeds
         pos.size -= sell_size
-        # 计算剩余持仓的成本价（扣除已回款后的摊薄成本）
         remaining_cost = total_cost - pos.partial_proceeds
         avg_cost = remaining_cost / pos.size if pos.size > 0 else 0
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
                   f"{sell_size}股→剩余{pos.size}股  价格={price:.2f}  "
                   f"成本价 {pos.buy_price:.2f}→{avg_cost:.2f}  "
-                  f"成本={total_cost:,.0f}  回款={pos.partial_proceeds:,.0f}  "
+                  f"剩余成本={remaining_cost:,.0f}  本次回款={proceeds:,.0f}  "
                   f"盈亏={pnl:+.2f}%  {reason}  "
                   f"持仓={len(self._positions)}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
