@@ -73,8 +73,8 @@ def load_market_index(tdxdir=TDX_DIR, market=TDX_MARKET):
         df = reader.daily(symbol=MARKET_INDEX_CODE)
         if df is not None and len(df) > 0:
             return df.sort_index()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  警告: 加载大盘指数失败: {e}")
     return None
 
 
@@ -102,7 +102,7 @@ def compute_market_macd_for_trading_days(trading_days, tdxdir=TDX_DIR,
         trading_days: DatetimeIndex 交易日历
 
     Returns:
-        market_macd_bullish: dict {pd.Timestamp: bool} 或 None
+        market_macd_bullish: np.ndarray[bool] 或 None
     """
     df = load_market_index(tdxdir, market)
     if df is None:
@@ -112,27 +112,9 @@ def compute_market_macd_for_trading_days(trading_days, tdxdir=TDX_DIR,
     close = df["close"].values.astype(float)
     _, _, bullish = compute_market_macd(close)
 
-    # 构建日期 -> MACD多头状态 的映射
-    result = {}
-    for i, dt in enumerate(df.index):
-        if i < len(bullish):
-            result[pd.Timestamp(dt)] = bool(bullish[i])
-
-    # 映射到交易天数组
-    macd_arr = np.zeros(len(trading_days), dtype=bool)
-    for j, td in enumerate(trading_days):
-        ts = pd.Timestamp(td)
-        if ts in result:
-            macd_arr[j] = result[ts]
-        else:
-            # 找最近的之前交易日
-            mask = df.index <= ts
-            if mask.any():
-                last_idx = np.where(mask)[0][-1]
-                if last_idx < len(bullish):
-                    macd_arr[j] = bool(bullish[last_idx])
-
-    return macd_arr
+    macd_series = pd.Series(bullish, index=df.index)
+    aligned = macd_series.reindex(trading_days, method='ffill').fillna(False)
+    return aligned.values.astype(bool)
 
 
 # ---------- 策略类 ----------
@@ -176,7 +158,6 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
         self._last_sl_bar = None
-        self._mid_yang_triggered = False
 
         # 计算个股指标
         self.indicators()
@@ -372,11 +353,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-        # 个股MACD多头（暂屏蔽）
-        # stock_dif = EMA(C, MARKET_MACD_FAST) - EMA(C, MARKET_MACD_SLOW)
-        # stock_dea = EMA(stock_dif, MARKET_MACD_SIGNAL)
-        # self._stock_macd_bullish = np.where(
-        #     np.isnan(stock_dif) | np.isnan(stock_dea), False, stock_dif > stock_dea)
+        # 个股MACD多头过滤（暂未启用，预留接口）
         self._stock_macd_bullish = np.ones(len(C), dtype=bool)
 
     # ------------------------------------------------------------------ #
@@ -437,7 +414,6 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.stop_loss_price = sl
         self.hold_until_below_white = False
         self.initial_size = 0
-        self._mid_yang_triggered = False
 
         self.log(f"买入  @ {self.data.close[0]:.2f}  止损={sl:.2f}")
 
@@ -496,7 +472,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     return
             # 未清仓：继续检查涨停卖1/2
 
-        # 5. 涨停卖1/2（半仓模式下仍可触发，不受中阳标记限制）
+        # 5. 涨停卖1/2（半仓模式下仍可触发）
         limit_pct = 1.20 if self.p.stock_type == "tech" else 1.10
         prev_close = self.data.close[-1]
         limit_up_price = round(prev_close * limit_pct, 2)
@@ -505,6 +481,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
                 self.log(f"涨停卖半 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                # position.size 尚未更新（订单已提交未执行），用当前持仓-卖出量预测剩余
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
             return
@@ -516,7 +493,6 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                 sell_size = max(1, int(self.position.size / 3))
                 if sell_size < self.position.size:
                     self.order = self.sell(size=sell_size)
-                    self._mid_yang_triggered = True
                     self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     if self.position.size - sell_size <= self.initial_size / 2:
                         self.hold_until_below_white = True
@@ -534,8 +510,8 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             sym = self.data._name or "?"
             print(f"[{dt.isoformat()}] {sym}  [B1V2] {txt}")
 
-    def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok=True,
-                             stock_macd_ok=True):
+    def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok,
+                             stock_macd_ok):
         sym = self.data._name or "?"
         idx = len(self) - 1
         w = "Y" if weekly_ok else "N"
@@ -626,10 +602,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
     bars_gc = np.asarray(BARSLAST(gc_arr), dtype=float)
     gc_ok = bars_gc[i] <= params["gc_lookback"]
 
-    # 个股MACD多头（暂屏蔽）
-    # stock_dif = EMA(C, MARKET_MACD_FAST) - EMA(C, MARKET_MACD_SLOW)
-    # stock_dea = EMA(stock_dif, MARKET_MACD_SIGNAL)
-    # stock_macd_ok = bool(stock_dif[i] > stock_dea[i]) if not (np.isnan(stock_dif[i]) or np.isnan(stock_dea[i])) else False
+    # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_ok = True
 
     if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok):
@@ -647,7 +620,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
     relax = 0.9 if is_volatile else 1.0
 
     daily_amp = (H[i] - L[i]) / L[i] * 100
-    daily_pct = abs(C[i] - C[i - 1]) / C[i - 1] * 100 * relax
+    daily_pct = abs(C[i] - C[i - 1]) / C[i - 1] * 100 * relax if C[i - 1] > 0 else 0.0
     up_doji = (C[i] > C[i - 1]) and (abs(C[i] - O[i]) / O[i] * 100 * relax < 1.8)
 
     needle_20 = ((SHORT <= 20) & (LONG >= 75)) | ((LONG - SHORT) >= 70)
@@ -770,6 +743,7 @@ def _init_process(tdxdir, market):
 
 def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
     """扫描单只股票（大盘MACD在调用方层面已判断，此处直接使用 market_macd_ok）"""
+    assert _process_reader is not None, "_process_reader 未初始化，请在子进程中调用"
     try:
         df = _process_reader.daily(symbol=code)
         if df is None or len(df) < 300:
@@ -791,13 +765,18 @@ def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
             sig["code"] = code
             return code, sig, False
         return code, None, False
-    except Exception:
-        return code, None, True
+    except Exception as e:
+        return code, {"error": str(e)}, True
 
 
 def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
-             tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS):
-    """V2全市场扫描：增加大盘MACD过滤"""
+             tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS,
+             skip_on_bear=False):
+    """V2全市场扫描：增加大盘MACD过滤
+
+    Args:
+        skip_on_bear: 大盘空头时跳过扫描（节省时间），默认 False（仍扫描但不执行买入）
+    """
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     # 检查大盘MACD状态
@@ -810,6 +789,9 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
         status = "多头" if market_macd_ok else "空头"
         print(f"  大盘MACD状态: {status} (最新收盘={market_close[-1]:.2f})")
         if not market_macd_ok:
+            if skip_on_bear:
+                print("  大盘MACD处于空头区间，跳过扫描 (skip_on_bear=True)")
+                return [], market_macd_ok
             print("  大盘MACD处于空头区间，仅扫描不执行买入")
     else:
         print("  警告: 无法获取大盘MACD数据，跳过大盘过滤")
@@ -1059,11 +1041,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-    # 个股MACD多头（暂屏蔽）
-    # stock_dif = EMA(C, MARKET_MACD_FAST) - EMA(C, MARKET_MACD_SLOW)
-    # stock_dea = EMA(stock_dif, MARKET_MACD_SIGNAL)
-    # stock_macd_bullish = np.where(
-    #     np.isnan(stock_dif) | np.isnan(stock_dea), False, stock_dif > stock_dea)
+    # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_bullish = np.ones(len(C), dtype=bool)
 
     return {
@@ -1083,6 +1061,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
 
 
 def _scan_one_all_bars(code, params):
+    assert _process_reader is not None, "_process_reader 未初始化，请在子进程中调用"
     try:
         df = _process_reader.daily(symbol=code)
         if df is None or len(df) < 300:
@@ -1096,8 +1075,8 @@ def _scan_one_all_bars(code, params):
             df["volume"].values.astype(float),
             df.index, params)
         return code, signals, False
-    except Exception:
-        return code, None, True
+    except Exception as e:
+        return code, {"error": str(e)}, True
 
 
 def preload_all_signals(start="2024-01-01", end="2025-12-31",
@@ -1123,9 +1102,10 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
 
     all_signals = {}
     errors = 0
+    error_details = []
     done = 0
     t0 = time.time()
-    all_dates = set()
+    all_dates_index = pd.DatetimeIndex([])
 
     with ProcessPoolExecutor(
         max_workers=max_workers,
@@ -1141,10 +1121,11 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
             done += 1
             if err:
                 errors += 1
+                if isinstance(signals, dict) and "error" in signals:
+                    error_details.append(f"{code}: {signals['error']}")
             elif signals is not None:
                 all_signals[code] = signals
-                if hasattr(signals["dates"], "to_list"):
-                    all_dates.update(signals["dates"])
+                all_dates_index = all_dates_index.union(signals["dates"])
             if done % 500 == 0:
                 print(f"  ... 已处理 {done}/{total} ({done/total*100:.0f}%)  "
                       f"有效 {len(all_signals)}  耗时 {time.time()-t0:.1f}s")
@@ -1153,8 +1134,9 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
 
     start_ts = pd.Timestamp(start)
     end_ts = pd.Timestamp(end)
-    sorted_dates = sorted(d for d in all_dates if start_ts <= d <= end_ts)
-    trading_days = pd.DatetimeIndex(sorted_dates)
+    mask = (all_dates_index >= start_ts) & (all_dates_index <= end_ts)
+    trading_days = all_dates_index[mask].sort_values().unique()
+    trading_days = pd.DatetimeIndex(trading_days)
 
     print(f"\n  预加载完成: {len(all_signals)} 只  错误 {errors}  "
           f"交易日 {len(trading_days)}  耗时 {elapsed:.1f}s")

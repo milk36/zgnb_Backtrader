@@ -71,3 +71,16 @@ MACD 参数由 `config.py` 配置：`MARKET_MACD_FAST=12`, `MARKET_MACD_SLOW=26`
 - `preload_all_signals()` 返回三元组，V1 返回二元组
 - `_compute_signals()` 与 `_compute_all_bar_signals()` 中的个股指标逻辑与 V1 相同，大盘 MACD 在调用方或模拟器层面过滤
 - V1 文档中关于 B1 七子条件、出场逻辑、调试参数的说明完全适用于 V2
+
+### 代码审查修复记录（2026-04）
+
+- **移除 `_mid_yang_triggered` 死代码**：该变量在 `_check_exit()` 中被赋值但从未读取，属于遗留死代码，已从 `__init__`、`_check_entry`、`_check_exit`、`_reset_position_state` 中清除
+- **修复 `_compute_signals()` 除零风险**：`daily_pct` 计算添加 `C[i-1] > 0` 保护
+- **优化 `compute_market_macd_for_trading_days`**：用 `pd.Series.reindex(method='ffill')` 替代 O(n*m) 嵌套循环
+- **优化 `preload_all_signals` 日期收集**：用 `DatetimeIndex.union` 替代 set + sorted，移除无意义的 `hasattr` 检查
+- **清理个股 MACD 注释**：三处注释块简化为 `个股MACD多头过滤（暂未启用，预留接口）`
+- **移除 `_print_filter_result` 无用默认参数**：`market_macd_ok` 和 `stock_macd_ok` 不再有默认值
+- **添加 `_process_reader` 非空检查**：`_scan_one` 和 `_scan_one_all_bars` 入口添加 assert
+- **改善异常处理**：`except Exception` 不再静默吞错，返回错误详情
+- **添加 `skip_on_bear` 参数**：`scan_all()` 支持大盘空头时跳过扫描以节省时间
+- **添加 `position.size` 预测值注释**：澄清涨停卖半中 `position.size - sell_size` 是预测值而非已执行结果
