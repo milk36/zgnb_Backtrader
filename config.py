@@ -42,10 +42,18 @@ HUANGBAI_GC_LOOKBACK = 20  # 金叉回溯天数
 STOCK_TYPE = "main"   # "main" 或 "tech"
 SCAN_MAX_WORKERS = 10  # 全市场扫描线程数，None=自动(CPU核心数)，1=单线程
 
-# 组合模拟参数
+# 组合模拟参数（黄白线B1）
 PORTFOLIO_INITIAL_CASH = 1_000_000   # 100万
 PORTFOLIO_MAX_POSITIONS = 10         # 最多10只
 PORTFOLIO_PER_POSITION = 100_000     # 每只10万
+
+# 动能砖组合模拟参数
+DNZH_INITIAL_CASH = 100_000          # 10万
+DNZH_MAX_POSITIONS = 2               # 最多2只
+DNZH_PER_POSITION = 50_000           # 每只5万
+DNZH_T_PLUS_N = 2                    # 2日不拉升清仓
+DNZH_MAX_HOLD_DAYS = 5               # 脱离成本5%以上持仓最多5天
+DNZH_PROFIT_PCT = 5.0                # 脱离成本区百分比
 
 # 日志
 LOG_DIR = "logs"
