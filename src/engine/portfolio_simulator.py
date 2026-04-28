@@ -101,6 +101,29 @@ class PortfolioSimulator:
             return None
         return idx
 
+    def _log_macd_summary(self):
+        """输出大盘MACD多头/空头日期区间摘要"""
+        bullish = self._market_macd_bullish
+        days = self._trading_days
+        segments = []
+        i = 0
+        while i < len(bullish):
+            if bullish[i]:
+                start = days[i]
+                while i < len(bullish) and bullish[i]:
+                    i += 1
+                end = days[i - 1]
+                segments.append(("多头", start, end))
+            else:
+                start = days[i]
+                while i < len(bullish) and not bullish[i]:
+                    i += 1
+                end = days[i - 1]
+                segments.append(("空头", start, end))
+        self._log(f"  {self._strategy_tag} 大盘MACD日期区间:")
+        for label, s, e in segments:
+            self._log(f"    {label}: {s.strftime('%Y-%m-%d')} ~ {e.strftime('%Y-%m-%d')}")
+
     def run(self):
         """执行组合级模拟"""
         self._cash = self._initial_cash
@@ -120,6 +143,10 @@ class PortfolioSimulator:
             self._log(f"  {self._strategy_tag} 交易日历: {first.strftime('%Y-%m-%d')} ~ {last.strftime('%Y-%m-%d')}  "
                       f"共{len(self._trading_days)}天  [{year_info}]")
             self._log(f"  {self._strategy_tag} 日志文件: {self._log_path}")
+
+        # 输出大盘MACD多头日期区间摘要
+        if self._market_macd_bullish is not None:
+            self._log_macd_summary()
 
         # 构建交易日 → 序号映射（用于计算持仓交易日数）
         self._td_index = {td: i for i, td in enumerate(self._trading_days)}
@@ -249,9 +276,16 @@ class PortfolioSimulator:
         self._positions[code] = pos
         self._cash -= total_cost
 
+        # 大盘MACD状态
+        macd_tag = ""
+        if self._market_macd_bullish is not None:
+            td_idx = self._td_index.get(date)
+            if td_idx is not None:
+                macd_tag = f"  大盘={'多头' if self._market_macd_bullish[td_idx] else '空头'}"
+
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 买入 {code}  "
                   f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
-                  f"缩量={score:.3f}  "
+                  f"缩量={score:.3f}{macd_tag}  "
                   f"持仓={len(self._positions)}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
 
