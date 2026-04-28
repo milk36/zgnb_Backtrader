@@ -20,7 +20,7 @@ class Position:
         "code", "buy_date", "buy_price", "buy_low",
         "white_at_buy", "yellow_at_buy", "stop_loss",
         "size", "initial_size", "hold_until_below_white",
-        "mid_yang_triggered",
+        "mid_yang_triggered", "partial_proceeds",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -36,6 +36,7 @@ class Position:
         self.initial_size = size
         self.hold_until_below_white = False
         self.mid_yang_triggered = False
+        self.partial_proceeds = 0.0  # 部分卖出累计回款
 
 
 class PortfolioSimulator:
@@ -366,7 +367,10 @@ class PortfolioSimulator:
     def _sell_position(self, code, pos, price, date, reason):
         """全部卖出"""
         proceeds = pos.size * price * (1 - self._commission)
-        pnl = (price - pos.buy_price) / pos.buy_price * 100
+        total_proceeds = pos.partial_proceeds + proceeds
+        total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+        pnl = (total_proceeds - total_cost) / total_cost * 100
+        pnl_amount = total_proceeds - total_cost
         self._cash += proceeds
         self._trade_list.append({
             "code": code,
@@ -374,23 +378,33 @@ class PortfolioSimulator:
             "sell_date": date,
             "buy_price": pos.buy_price,
             "sell_price": price,
-            "size": pos.size + (pos.initial_size - pos.size),  # 记录原始买入量
+            "size": pos.initial_size,
             "pnl_pct": pnl,
+            "pnl_amount": pnl_amount,
             "reason": reason,
         })
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
-                  f"价格={price:.2f}  收益={pnl:+.2f}%  {reason}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 清仓 {code}  "
+                  f"价格={price:.2f}  "
+                  f"买入={pos.buy_price:.2f}  成本={total_cost:,.0f}  回款={total_proceeds:,.0f}  "
+                  f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  {reason}  "
                   f"持仓={len(self._positions)-1}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
 
     def _sell_partial(self, code, pos, sell_size, price, date, reason):
         """部分卖出"""
         proceeds = sell_size * price * (1 - self._commission)
+        total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
         pnl = (price - pos.buy_price) / pos.buy_price * 100
         self._cash += proceeds
+        pos.partial_proceeds += proceeds
         pos.size -= sell_size
+        # 计算剩余持仓的成本价（扣除已回款后的摊薄成本）
+        remaining_cost = total_cost - pos.partial_proceeds
+        avg_cost = remaining_cost / pos.size if pos.size > 0 else 0
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
-                  f"部分 {sell_size}股→剩余{pos.size}股  价格={price:.2f}  盈亏={pnl:+.2f}%  {reason}  "
+                  f"{sell_size}股→剩余{pos.size}股  价格={price:.2f}  "
+                  f"成本价 {pos.buy_price:.2f}→{avg_cost:.2f}  "
+                  f"盈亏={pnl:+.2f}%  {reason}  "
                   f"持仓={len(self._positions)}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
 
