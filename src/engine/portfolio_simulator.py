@@ -371,6 +371,9 @@ class PortfolioSimulator:
         total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
         pnl = (total_proceeds - total_cost) / total_cost * 100
         pnl_amount = total_proceeds - total_cost
+        # 剩余持仓的摊薄成本价
+        remaining_cost = total_cost - pos.partial_proceeds
+        avg_cost = remaining_cost / pos.size if pos.size > 0 else 0
         self._cash += proceeds
         self._trade_list.append({
             "code": code,
@@ -385,7 +388,8 @@ class PortfolioSimulator:
         })
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 清仓 {code}  "
                   f"价格={price:.2f}  "
-                  f"买入={pos.buy_price:.2f}  成本={total_cost:,.0f}  回款={total_proceeds:,.0f}  "
+                  f"成本价 {pos.buy_price:.2f}→{avg_cost:.2f}  "
+                  f"成本={total_cost:,.0f}  回款={total_proceeds:,.0f}  "
                   f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  {reason}  "
                   f"持仓={len(self._positions)-1}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
