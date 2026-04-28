@@ -408,6 +408,7 @@ class PortfolioSimulator:
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
                   f"{sell_size}股→剩余{pos.size}股  价格={price:.2f}  "
                   f"成本价 {pos.buy_price:.2f}→{avg_cost:.2f}  "
+                  f"成本={total_cost:,.0f}  回款={pos.partial_proceeds:,.0f}  "
                   f"盈亏={pnl:+.2f}%  {reason}  "
                   f"持仓={len(self._positions)}/{self._max_positions}  "
                   f"现金={self._cash:,.0f}")
