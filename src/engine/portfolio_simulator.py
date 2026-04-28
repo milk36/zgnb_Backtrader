@@ -227,7 +227,8 @@ class PortfolioSimulator:
             try:
                 gc_ok = sig["recent_gc"][idx]
                 b1_ok = sig["b1"][idx]
-                if gc_ok and b1_ok:
+                stock_macd_ok = sig.get("stock_macd_bullish", np.ones(idx + 1, dtype=bool))[idx]
+                if gc_ok and b1_ok and stock_macd_ok:
                     score = sig["shrink_score"][idx]
                     if np.isnan(score):
                         score = 1.0
@@ -365,7 +366,7 @@ class PortfolioSimulator:
             # 4. 半仓持股模式（仅盈转亏/跌破白线可清仓，不再触发中阳）
             if pos.hold_until_below_white:
                 sold = False
-                if pct_gain <= 20:
+                if real_gain <= 20:
                     # 盈利20%以内：盈转亏清仓（基于摊薄成本价判断）
                     if price <= avg_cost:
                         cur_idx = self._td_index.get(date)

@@ -9,8 +9,9 @@
 1. 周线多头空间
 2. 大盘MACD处于多头区间（V2新增）
 3. 黄白线金叉
-4. B1买入信号（7个子条件OR）
-5. 止损/止盈逻辑同V1
+4. 个股MACD处于多头空间
+5. B1买入信号（7个子条件OR）
+6. 止损/止盈逻辑同V1
 """
 
 import os
@@ -165,6 +166,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         ("skip_weekly", False),
         ("skip_gc", False),
         ("skip_market_macd", False),
+        ("skip_stock_macd", False),
     )
 
     def __init__(self):
@@ -370,6 +372,13 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+        # 个股MACD多头（暂屏蔽）
+        # stock_dif = EMA(C, MARKET_MACD_FAST) - EMA(C, MARKET_MACD_SLOW)
+        # stock_dea = EMA(stock_dif, MARKET_MACD_SIGNAL)
+        # self._stock_macd_bullish = np.where(
+        #     np.isnan(stock_dif) | np.isnan(stock_dea), False, stock_dif > stock_dea)
+        self._stock_macd_bullish = np.ones(len(C), dtype=bool)
+
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
     # ------------------------------------------------------------------ #
@@ -396,13 +405,14 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         weekly_ok = self.p.skip_weekly or (self._weekly_bull[idx] and self._above_ma30w[idx])
         gc_ok = self.p.skip_gc or self._recent_gc[idx]
         b1_ok = self._b1[idx]
+        stock_macd_ok = self.p.skip_stock_macd or self._stock_macd_bullish[idx]
 
         if self.p.print_log:
-            self._print_filter_result(dt, weekly_ok, gc_ok, b1_ok, market_macd_ok)
+            self._print_filter_result(dt, weekly_ok, gc_ok, b1_ok, market_macd_ok, stock_macd_ok)
 
         if not market_macd_ok:
             return
-        if not weekly_ok or not gc_ok or not b1_ok:
+        if not weekly_ok or not gc_ok or not b1_ok or not stock_macd_ok:
             return
 
         if self._last_sl_bar is not None and (len(self) - self._last_sl_bar) < 10:
@@ -524,20 +534,23 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             sym = self.data._name or "?"
             print(f"[{dt.isoformat()}] {sym}  [B1V2] {txt}")
 
-    def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok=True):
+    def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok=True,
+                             stock_macd_ok=True):
         sym = self.data._name or "?"
         idx = len(self) - 1
         w = "Y" if weekly_ok else "N"
         g = "Y" if gc_ok else "N"
         b = "Y" if b1_ok else "N"
         m = "Y" if market_macd_ok else "N"
-        all_pass = market_macd_ok and weekly_ok and gc_ok and b1_ok
+        s = "Y" if stock_macd_ok else "N"
+        all_pass = market_macd_ok and weekly_ok and gc_ok and b1_ok and stock_macd_ok
 
         if not b1_ok and not all_pass:
             return
 
         tag = " <<< SELECT" if all_pass else ""
-        print(f"[{dt.isoformat()}] {sym}  [B1V2] 大盘={m}  周线={w}  金叉={g}  B1={b}  "
+        print(f"[{dt.isoformat()}] {sym}  [B1V2] 大盘={m}  周线={w}  金叉={g}  "
+              f"个股MACD={s}  B1={b}  "
               f"C={self.data.close[0]:.2f}  "
               f"J={self.kdj._j[idx]:.1f}  RSI={self._rsi[idx]:.1f}"
               f"{tag}")
@@ -613,9 +626,15 @@ def _compute_signals(C, H, L, O, V, dates, params):
     bars_gc = np.asarray(BARSLAST(gc_arr), dtype=float)
     gc_ok = bars_gc[i] <= params["gc_lookback"]
 
-    if not (weekly_ok and above_ma30w and gc_ok):
+    # 个股MACD多头（暂屏蔽）
+    # stock_dif = EMA(C, MARKET_MACD_FAST) - EMA(C, MARKET_MACD_SLOW)
+    # stock_dea = EMA(stock_dif, MARKET_MACD_SIGNAL)
+    # stock_macd_ok = bool(stock_dif[i] > stock_dea[i]) if not (np.isnan(stock_dif[i]) or np.isnan(stock_dea[i])) else False
+    stock_macd_ok = True
+
+    if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
-                "market_macd": True, "b1": False,
+                "market_macd": True, "b1": False, "stock_macd": stock_macd_ok,
                 "close": C[i], "J": J[i], "RSI": rsi[i],
                 "shrink_score": 0}
 
@@ -735,6 +754,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
         b1 = True
 
     return {"weekly": True, "gc": True, "market_macd": True, "b1": b1,
+            "stock_macd": stock_macd_ok,
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
@@ -766,7 +786,8 @@ def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
             return code, None, False
         weekly_ok = skip_weekly or sig["weekly"]
         gc_ok = skip_gc or sig["gc"]
-        if sig["b1"] and weekly_ok and gc_ok and market_macd_ok:
+        stock_macd_ok = sig.get("stock_macd", True)
+        if sig["b1"] and weekly_ok and gc_ok and stock_macd_ok and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -1038,12 +1059,20 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+    # 个股MACD多头（暂屏蔽）
+    # stock_dif = EMA(C, MARKET_MACD_FAST) - EMA(C, MARKET_MACD_SLOW)
+    # stock_dea = EMA(stock_dif, MARKET_MACD_SIGNAL)
+    # stock_macd_bullish = np.where(
+    #     np.isnan(stock_dif) | np.isnan(stock_dea), False, stock_dif > stock_dea)
+    stock_macd_bullish = np.ones(len(C), dtype=bool)
+
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
         "recent_gc": recent_gc,
         "b1": b1,
         "shrink_score": shrink_score,
+        "stock_macd_bullish": stock_macd_bullish,
         "white": white,
         "yellow": yellow,
         "close": C,
