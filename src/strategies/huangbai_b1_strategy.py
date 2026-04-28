@@ -27,7 +27,12 @@ from mootdx.reader import Reader
 from src.indicators.kdj_indicator import KDJIndicator
 from src.strategies.base_strategy import BaseStrategy
 
-from config import TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS
+from config import (
+    TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS, STOCK_TYPE,
+    HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
+    HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
+    HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
+)
 
 
 # ---------- helper ----------
@@ -67,22 +72,22 @@ class HuangBaiB1Strategy(BaseStrategy):
     params = (
         ("print_log", True),
         ("position_pct", 0.1),       # 10万/100万
-        ("stock_type", "main"),       # "main" / "tech"
+        ("stock_type", STOCK_TYPE),       # "main" / "tech"
 
         # 黄白线参数
-        ("m1", 14), ("m2", 28), ("m3", 57), ("m4", 114),
+        ("m1", HUANGBAI_M1), ("m2", HUANGBAI_M2), ("m3", HUANGBAI_M3), ("m4", HUANGBAI_M4),
 
         # B1 振幅参数
-        ("n", 20), ("m", 50), ("n1", 3), ("n2", 21),
+        ("n", HUANGBAI_N), ("m", HUANGBAI_M), ("n1", HUANGBAI_N1), ("n2", HUANGBAI_N2),
 
         # 止损止盈
-        ("t_plus_n", 3),
+        ("t_plus_n", HUANGBAI_T_PLUS_N),
 
         # 周线MA周期（实际周线，非日线近似）
         ("wma30", 30), ("wma60", 60), ("wma120", 120), ("wma240", 240),
 
         # 金叉回溯
-        ("gc_lookback", 20),
+        ("gc_lookback", HUANGBAI_GC_LOOKBACK),
 
         # 调试：跳过周线/金叉过滤，仅测试B1信号
         ("skip_weekly", False),
@@ -714,10 +719,10 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
     print(f"扫描 {total} 只A股... (workers={max_workers or 'auto'})")
 
     params = {
-        "m1": 14, "m2": 28, "m3": 57, "m4": 114,
-        "n": 20, "m": 50, "n1": 3, "n2": 21,
+        "m1": HUANGBAI_M1, "m2": HUANGBAI_M2, "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
+        "n": HUANGBAI_N, "m": HUANGBAI_M, "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
         "wma30": 30, "wma60": 60, "wma120": 120, "wma240": 240,
-        "gc_lookback": 20, "stock_type": stock_type,
+        "gc_lookback": HUANGBAI_GC_LOOKBACK, "stock_type": stock_type,
     }
 
     results = []
@@ -1026,10 +1031,10 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
     print(f"预加载 {total} 只A股信号... (workers={max_workers or 'auto'})")
 
     params = {
-        "m1": 14, "m2": 28, "m3": 57, "m4": 114,
-        "n": 20, "m": 50, "n1": 3, "n2": 21,
+        "m1": HUANGBAI_M1, "m2": HUANGBAI_M2, "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
+        "n": HUANGBAI_N, "m": HUANGBAI_M, "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
         "wma30": 30, "wma60": 60, "wma120": 120, "wma240": 240,
-        "gc_lookback": 20, "stock_type": stock_type,
+        "gc_lookback": HUANGBAI_GC_LOOKBACK, "stock_type": stock_type,
     }
 
     all_signals = {}
