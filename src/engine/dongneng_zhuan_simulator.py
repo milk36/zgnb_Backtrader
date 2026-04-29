@@ -3,11 +3,12 @@
 交易规则：
 - 总资金10万，单只最多5万，最多持仓2只
 - 信号日T检测 → T+1分钟线确认买入（无分钟线时降级为开盘价）
-- 四级退出（优先级从高到低）：
-  1. 止损：分钟级监控买入K线最低价
-  2. 涨停清仓：分钟级监控涨停价
-  3. 2日不拉升（价格<=买入价）清仓
-  4. 脱离成本5%以上，持仓最多4-6天
+- 五级退出（优先级从高到低）：
+  1. 止损：分钟级监控跌破买入价4%
+  2. 涨停清仓：分钟级监控涨停价（含累计盈利>10%）
+  3. 涨幅2%：卖出1/4仓位（仅一次）
+  4. 2日不拉升（价格<=买入价）清仓
+  5. 脱离成本5%以上，持仓最多4-6天
 - 按"下大上小"排名取前N只买入
 """
 
@@ -24,6 +25,7 @@ class Position:
     __slots__ = (
         "code", "buy_date", "buy_price", "buy_low",
         "stop_loss", "size", "initial_size", "confirmed_minute",
+        "partial_sold",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low, stop_loss, size):
@@ -35,6 +37,7 @@ class Position:
         self.size = size
         self.initial_size = size
         self.confirmed_minute = False
+        self.partial_sold = False
 
 
 class DongnengZhuanSimulator:
@@ -44,6 +47,7 @@ class DongnengZhuanSimulator:
                  initial_cash=100_000, max_positions=2,
                  per_position_cash=50_000, commission=0.0003,
                  t_plus_n=2, max_hold_days=5, profit_pct=5.0,
+                 stop_loss_pct=4.0,
                  log_dir="logs",
                  minute_feed=None, minute_confirm_bars=3,
                  minute_entry_enabled=True, minute_exit_enabled=True):
@@ -56,6 +60,7 @@ class DongnengZhuanSimulator:
         self._t_plus_n = t_plus_n
         self._max_hold_days = max_hold_days
         self._profit_pct = profit_pct
+        self._stop_loss_pct = stop_loss_pct
         self._minute_feed = minute_feed
         self._confirm_bars = max(1, minute_confirm_bars)
         self._minute_entry = minute_entry_enabled and (minute_feed is not None)
@@ -115,7 +120,8 @@ class DongnengZhuanSimulator:
             self._log(f"  [动能砖] 资金={self._initial_cash:,.0f}  "
                       f"每只={self._per_position_cash:,.0f}  "
                       f"最多{self._max_positions}只  "
-                      f"T+{self._t_plus_n}  最大持仓{self._max_hold_days}天")
+                      f"T+{self._t_plus_n}  最大持仓{self._max_hold_days}天  "
+                      f"止损-{self._stop_loss_pct}%")
             mode_entry = "分钟确认" if self._minute_entry else "日线开盘"
             mode_exit = "分钟监控" if self._minute_exit else "日线检查"
             self._log(f"  [动能砖] 入场={mode_entry}  出场={mode_exit}  "
@@ -220,16 +226,17 @@ class DongnengZhuanSimulator:
                 total_cost = shares * buy_price * (1 + self._commission)
 
             low_val = sig["low"][idx]
+            stop_loss = round(buy_price * (1 - self._stop_loss_pct / 100), 2)
             pos = Position(
                 code=code, buy_date=date, buy_price=buy_price,
-                buy_low=low_val, stop_loss=low_val, size=shares)
+                buy_low=low_val, stop_loss=stop_loss, size=shares)
             pos.confirmed_minute = confirmed
             self._positions[code] = pos
             self._cash -= total_cost
 
             self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] 买入 {code}  "
                       f"价格={buy_price:.2f}({buy_reason})  数量={shares}  "
-                      f"止损={low_val:.2f}  排名={rank_score:.2f}  "
+                      f"止损={stop_loss:.2f}(-{self._stop_loss_pct}%)  排名={rank_score:.2f}  "
                       f"持仓={len(self._positions)}/{self._max_positions}  "
                       f"现金={self._cash:,.0f}")
 
@@ -275,7 +282,10 @@ class DongnengZhuanSimulator:
             self._pending_buys.append((code, score, date))
 
     def _check_exits(self, date):
-        """检查所有持仓的卖出条件，支持分钟级止损/涨停监控"""
+        """检查所有持仓的卖出条件
+
+        优先级：止损 → 涨停清仓 → 2%涨幅卖1/4 → T+N不拉升 → 盈利止盈
+        """
         to_remove = []
         cur_idx = self._td_index.get(date, 0)
 
@@ -303,12 +313,11 @@ class DongnengZhuanSimulator:
 
             pct_gain = (daily_close - pos.buy_price) / pos.buy_price * 100
 
-            # 涨停价计算
             is_tech = code[:2] in ("30", "68")
             limit_pct = 1.20 if is_tech else 1.10
             limit_up_price = round(prev_close * limit_pct, 2) if prev_close > 0 else 0
 
-            # --- 分钟级止损/涨停监控 ---
+            # --- 分钟级监控 ---
             minute_exited = False
             if self._minute_exit:
                 bars = self._minute_feed.get_minute_bars(code, date)
@@ -318,8 +327,9 @@ class DongnengZhuanSimulator:
                         bar_low = float(bar["low"])
                         bar_high = float(bar["high"])
                         bar_close = float(bar["close"])
+                        bar_pct = (bar_close - pos.buy_price) / pos.buy_price * 100
 
-                        # 止损
+                        # 1. 止损
                         if bar_low <= pos.stop_loss:
                             sell_price = min(bar_close, pos.stop_loss)
                             self._cooldown[code] = cur_idx
@@ -329,15 +339,19 @@ class DongnengZhuanSimulator:
                             minute_exited = True
                             break
 
-                        # 涨停清仓
+                        # 2. 涨停清仓
                         if limit_up_price > 0 and bar_high >= limit_up_price:
-                            bar_pct = (bar_close - pos.buy_price) / pos.buy_price * 100
                             self._cooldown[code] = cur_idx
                             self._sell_position(code, pos, bar_close, date,
                                                 f"涨停清仓(分钟,盈利{bar_pct:.1f}%)")
                             to_remove.append(code)
                             minute_exited = True
                             break
+
+                        # 3. 涨幅2%卖1/4
+                        if not pos.partial_sold and bar_pct >= 2.0:
+                            self._partial_sell(code, pos, bar_close, date)
+                            # partial_sell 修改了 pos，继续检查后续 bar
 
             if minute_exited:
                 continue
@@ -359,7 +373,11 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. T+N不拉升清仓
+            # 3. 涨幅2%卖1/4（日线降级）
+            if not pos.partial_sold and pct_gain >= 2.0:
+                self._partial_sell(code, pos, daily_close, date)
+
+            # 4. T+N不拉升清仓
             if days_held >= self._t_plus_n and daily_close <= pos.buy_price:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, daily_close, date,
@@ -367,7 +385,7 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 4. 盈利止盈
+            # 5. 盈利止盈
             if pct_gain >= self._profit_pct and days_held >= self._max_hold_days:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, daily_close, date,
@@ -378,6 +396,38 @@ class DongnengZhuanSimulator:
         for code in set(to_remove):
             if code in self._positions:
                 del self._positions[code]
+
+    def _partial_sell(self, code, pos, price, date):
+        """卖出1/4仓位"""
+        sell_size = max(100, pos.size // 4 // 100 * 100)
+        if sell_size >= pos.size:
+            sell_size = pos.size
+
+        proceeds = sell_size * price * (1 - self._commission)
+        cost_basis = sell_size * pos.buy_price * (1 + self._commission)
+        pnl = (proceeds - cost_basis) / cost_basis * 100
+        pnl_amount = proceeds - cost_basis
+        self._cash += proceeds
+        pos.size -= sell_size
+        pos.partial_sold = True
+
+        self._trade_list.append({
+            "code": code,
+            "buy_date": pos.buy_date,
+            "sell_date": date,
+            "buy_price": pos.buy_price,
+            "sell_price": price,
+            "size": sell_size,
+            "pnl_pct": pnl,
+            "pnl_amount": pnl_amount,
+            "reason": f"涨2%卖1/4",
+            "partial": True,
+        })
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] 卖1/4 {code}  "
+                  f"价格={price:.2f}  数量={sell_size}  "
+                  f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  "
+                  f"剩余={pos.size}  "
+                  f"现金={self._cash:,.0f}")
 
     def _sell_position(self, code, pos, price, date, reason):
         """全部卖出"""
@@ -392,7 +442,7 @@ class DongnengZhuanSimulator:
             "sell_date": date,
             "buy_price": pos.buy_price,
             "sell_price": price,
-            "size": pos.initial_size,
+            "size": pos.size,
             "pnl_pct": pnl,
             "pnl_amount": pnl_amount,
             "reason": reason,

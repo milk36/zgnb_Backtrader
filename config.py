@@ -54,6 +54,7 @@ DNZH_PER_POSITION = 50_000           # 每只5万
 DNZH_T_PLUS_N = 2                    # 2日不拉升清仓
 DNZH_MAX_HOLD_DAYS = 5               # 脱离成本5%以上持仓最多5天
 DNZH_PROFIT_PCT = 5.0                # 脱离成本区百分比
+DNZH_STOP_LOSS_PCT = 4.0             # 止损百分比（买入价下跌4%）
 
 # 动能砖分钟级入场/出场参数
 DNZH_MINUTE_CONFIRM_BARS = 3         # 前3根5分钟线(9:30-9:45)确认入场
