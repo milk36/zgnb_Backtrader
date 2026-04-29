@@ -364,8 +364,12 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. 盈利100%清仓
-            if pct_gain >= 100:
+            # 3. 盈利100%清仓（基于实际总收益，含部分卖出回款）
+            total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+            current_value = pos.size * price * (1 - self._commission)
+            total_proceeds = pos.partial_proceeds + current_value
+            total_pnl_pct = (total_proceeds - total_cost) / total_cost * 100
+            if total_pnl_pct >= 100:
                 cur_idx = self._td_index.get(date)
                 if cur_idx is not None:
                     self._cooldown[code] = cur_idx
