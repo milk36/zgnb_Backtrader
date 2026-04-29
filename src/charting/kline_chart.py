@@ -35,7 +35,7 @@ FIG_WIDTH = 16
 FIG_HEIGHT = 9
 
 
-def generate_charts(trade_list, all_signals, output_dir="charts"):
+def generate_charts(trade_list, all_signals, output_dir="charts", sub_chart="volume"):
     """为所有交易过的股票生成K线图
 
     Args:
@@ -44,6 +44,7 @@ def generate_charts(trade_list, all_signals, output_dir="charts"):
                        size, pnl_pct, pnl_amount, reason
         all_signals: dict[str, dict] - 预加载信号数据 (key=股票代码)
         output_dir: str - 输出目录
+        sub_chart: str - 副图类型 "volume"(成交量) 或 "brick"(砖型图)
     """
     if not trade_list:
         print("  无交易记录，跳过图表生成")
@@ -69,7 +70,7 @@ def generate_charts(trade_list, all_signals, output_dir="charts"):
             skipped += 1
             continue
         try:
-            _plot_single_stock(code, sig, trades, output_dir)
+            _plot_single_stock(code, sig, trades, output_dir, sub_chart)
             generated += 1
         except Exception as e:
             print(f"  警告: 绘制 {code} 失败: {e}")
@@ -78,7 +79,7 @@ def generate_charts(trade_list, all_signals, output_dir="charts"):
     print(f"\n  图表生成完成: {generated} 只  跳过 {skipped} 只  目录: {output_dir}/")
 
 
-def _plot_single_stock(code, sig, trades, output_dir):
+def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     """为单只股票绘制完整K线图"""
     dates = sig["dates"]
     C = sig["close"]
@@ -128,8 +129,14 @@ def _plot_single_stock(code, sig, trades, output_dir):
     # 绘制买卖标记
     _draw_trade_markers(ax_price, x, dates_s, trades)
 
-    # 绘制成交量
-    _draw_volume(ax_vol, x, V_s, O_s, C_s, n)
+    # 绘制副图
+    if sub_chart == "brick" and sig.get("brick_value") is not None:
+        brick_s = sig["brick_value"][s]
+        _draw_brick(ax_vol, x, brick_s, n)
+        ax_vol.set_ylabel("砖型图", fontsize=10)
+    else:
+        _draw_volume(ax_vol, x, V_s, O_s, C_s, n)
+        ax_vol.set_ylabel("成交量", fontsize=10)
 
     # 格式化X轴日期
     step = max(1, n // 15)
@@ -141,7 +148,6 @@ def _plot_single_stock(code, sig, trades, output_dir):
 
     # Y轴标签
     ax_price.set_ylabel("价格", fontsize=10)
-    ax_vol.set_ylabel("成交量", fontsize=10)
 
     # 标题
     first_str = _fmt_date(first_date)
@@ -241,6 +247,37 @@ def _draw_volume(ax, x, volumes, opens, closes, n):
 
     ax.bar(x, volumes, width=0.7, color=colors, alpha=0.7)
     ax.set_xlim(-1, n)
+
+
+def _draw_brick(ax, x, brick, n):
+    """绘制砖型图副图
+
+    涨砖（brick > REF(brick,1)）画红色，跌砖画绿色。
+    每根柱子从 min(brick[i], brick[i-1]) 到 max(brick[i], brick[i-1])。
+    """
+    for i in range(n):
+        cur = float(brick[i])
+        if i == 0:
+            prev = cur
+        else:
+            prev = float(brick[i - 1])
+        if np.isnan(cur) or np.isnan(prev):
+            continue
+        bar_bottom = min(cur, prev)
+        bar_top = max(cur, prev)
+        if bar_top - bar_bottom < 0.001:
+            continue
+        color = COLOR_YANG if cur >= prev else COLOR_YIN
+        ax.bar(x[i], bar_top - bar_bottom, bottom=bar_bottom,
+               width=0.7, color=color, alpha=0.85)
+
+    ax.set_xlim(-1, n)
+    valid = ~np.isnan(brick)
+    if valid.any():
+        y_min = np.nanmin(brick[valid])
+        y_max = np.nanmax(brick[valid])
+        margin = (y_max - y_min) * 0.08
+        ax.set_ylim(max(0, y_min - margin), y_max + margin)
 
 
 def _draw_indicators(ax, x, white, yellow, bbi):

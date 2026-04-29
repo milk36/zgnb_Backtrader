@@ -151,7 +151,7 @@ def main():
 
         if args.chart:
             from src.charting import generate_charts
-            generate_charts(report["trade_list"], sim._all_signals)
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
 
     # ---- huangbai 策略：组合级模拟 ----
