@@ -186,9 +186,11 @@ def main():
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1]")
-        return
 
-    # ---- huangbai_v2 策略：组合级模拟（含大盘MACD过滤） ----
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals)
+        return
     if strategy_cls == HuangBaiB1V2Strategy and args.portfolio:
         from src.engine.portfolio_simulator import PortfolioSimulator
         from src.strategies.huangbai_b1_v2_strategy import preload_all_signals as preload_v2
@@ -273,9 +275,11 @@ def main():
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V3]")
-        return
 
-    # ---- huangbai 策略：全市场扫描 + 回测 ----
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals)
+        return
     if strategy_cls == HuangBaiB1Strategy and (args.scan or args.symbol is None):
         print("=" * 55)
         print("  阶段1: 全市场选股扫描")

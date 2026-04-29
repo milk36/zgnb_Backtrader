@@ -676,6 +676,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "close": C,
         "high": H,
         "low": L,
+        "open": O,
+        "volume": V,
         "dates": dates,
     }
 

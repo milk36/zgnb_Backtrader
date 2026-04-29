@@ -79,7 +79,7 @@
 
 | 函数/类 | 说明 |
 |---------|------|
-| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score 等），基于 `indicators()` 的逻辑 |
+| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score/open/volume 等），基于 `indicators()` 的逻辑 |
 | `_scan_one_all_bars(code, params)` | 并行加载单只股票数据并调用 `_compute_all_bar_signals()` |
 | `preload_all_signals(start, end, stock_type, max_workers)` | 用 ProcessPoolExecutor 并行预计算全部 A 股的每 bar 信号，返回 `(all_signals, trading_days)` |
 | `PortfolioSimulator`（`src/engine/portfolio_simulator.py`） | 组合级日频模拟引擎：100万资金、最多10只、每只10万，周更观察池+日检查买卖 |

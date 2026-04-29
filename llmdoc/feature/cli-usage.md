@@ -54,6 +54,7 @@
 | `--scan-only` | flag | - | 仅扫描选股，不回测 |
 | `--portfolio` | flag | - | 组合级模拟模式（仅 `huangbai` 系列需要，`dongneng_zhuan` 默认即为组合模拟） |
 | `--no-plot` | flag | - | 禁用回测结果绘图（仅指定股票回测模式有图） |
+| `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。仅 V1/V2/V3 `--portfolio` 模式有效 |
 
 ### 常用命令示例
 
@@ -62,6 +63,9 @@
 ```bash
 # 组合级模拟（推荐）
 python main.py --portfolio
+
+# 组合级模拟 + 生成交易K线图
+python main.py --portfolio --chart
 
 # 组合级模拟 + 完整参数
 python main.py --strategy huangbai --portfolio --start 2023-01-01 --end 2025-12-31
@@ -86,6 +90,9 @@ python main.py --symbol 688981 --stock-type tech --start 2024-01-01 --end 2025-0
 
 # V2 策略：组合级模拟（含大盘MACD过滤）
 python main.py --strategy huangbai_v2 --portfolio
+
+# V2 策略：组合级模拟 + K线图
+python main.py --strategy huangbai_v2 --portfolio --chart
 
 # V2 策略：指定股票回测（自动加载大盘指数数据）
 python main.py --strategy huangbai_v2 --symbol 002475
@@ -124,6 +131,7 @@ python main.py --strategy kdj --symbol 600036
 - **`--start / --end`**：所有模式通用。组合模拟模式下用于截取交易日历和信号数据范围；扫描模式下不影响扫描（扫描始终取最新 bar），仅影响后续逐只回测区间
 - **`--cash`**：仅在非组合模式下控制单股回测初始资金
 - **`--no-plot`**：仅指定股票回测模式有效，组合模拟和扫描模式无绘图
+- **`--chart`**：仅黄白线系列 `--portfolio` 组合模拟模式有效，模拟完成后为每只交易过的股票生成 K 线图（含买卖标记、止损线、成本线），保存到 `charts/` 目录
 
 #### 黄白线系列参数
 

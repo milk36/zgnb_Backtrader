@@ -21,11 +21,12 @@ plt.rcParams["axes.unicode_minus"] = False
 # ---- 常量 ----
 COLOR_YANG = "#ff4444"    # 阳线红
 COLOR_YIN = "#00aa00"     # 阴线绿
-COLOR_WHITE = "#e0e0e0"   # 白线
+COLOR_WHITE = "#666666"   # 白线（深灰，适配白色背景）
 COLOR_YELLOW = "#FFD700"  # 黄线
 COLOR_BBI = "#9966cc"     # BBI紫
 COLOR_BUY = "#00ff00"     # 买入标记
 COLOR_SELL = "#ff0000"    # 卖出标记
+COLOR_SELL_PARTIAL = "#ff8800"  # 部分卖出标记
 COLOR_STOP_LOSS = "#ff6600"  # 止损线橙
 COLOR_COST = "#00ccff"    # 成本线蓝
 DPI = 150
@@ -49,6 +50,11 @@ def generate_charts(trade_list, all_signals, output_dir="charts"):
         return
 
     os.makedirs(output_dir, exist_ok=True)
+
+    # 清空旧图表文件
+    for f in os.listdir(output_dir):
+        if f.lower().endswith(".png"):
+            os.remove(os.path.join(output_dir, f))
 
     # 按 code 分组交易
     trades_by_code = defaultdict(list)
@@ -138,14 +144,20 @@ def _plot_single_stock(code, sig, trades, output_dir):
     ax_vol.set_ylabel("成交量", fontsize=10)
 
     # 标题
-    total_pnl = sum(t.get("pnl_pct", 0) for t in trades)
     first_str = _fmt_date(first_date)
     last_str = _fmt_date(last_date)
-    ax_price.set_title(
-        f"{code} | {first_str} ~ {last_str} | 共{len(trades)}笔 | "
-        f"总PnL: {total_pnl:+.2f}%",
-        fontsize=13, fontweight="bold",
-    )
+    closed_trades = [t for t in trades if not t.get("partial")]
+    partial_count = len(trades) - len(closed_trades)
+    title = f"{code} | {first_str} ~ {last_str}"
+    if closed_trades:
+        pnl_parts = " ".join(
+            f"#{i+1}:{t['pnl_pct']:+.1f}%"
+            for i, t in enumerate(closed_trades)
+        )
+        title += f" | {pnl_parts}"
+    if partial_count > 0:
+        title += f" | 部分卖出{partial_count}笔"
+    ax_price.set_title(title, fontsize=13, fontweight="bold")
 
     # 图例
     legend_items = []
@@ -158,23 +170,25 @@ def _plot_single_stock(code, sig, trades, output_dir):
     legend_items.append(plt.Line2D([0], [0], marker="^", color=COLOR_BUY,
                                     linestyle="None", markersize=8, label="买入"))
     legend_items.append(plt.Line2D([0], [0], marker="v", color=COLOR_SELL,
-                                    linestyle="None", markersize=8, label="卖出"))
+                                    linestyle="None", markersize=8, label="清仓卖出"))
+    legend_items.append(plt.Line2D([0], [0], marker="v", color=COLOR_SELL_PARTIAL,
+                                    linestyle="None", markersize=6, label="部分卖出"))
     legend_items.append(plt.Line2D([0], [0], color=COLOR_STOP_LOSS,
                                     linestyle="--", lw=1.0, label="止损线"))
     legend_items.append(plt.Line2D([0], [0], color=COLOR_COST,
                                     linestyle=":", lw=0.8, label="成本线"))
     ax_price.legend(handles=legend_items, loc="upper left", fontsize=8,
-                    framealpha=0.8, facecolor="#1a1a2e")
+                    framealpha=0.9, facecolor="white")
 
-    ax_price.set_facecolor("#1a1a2e")
-    ax_vol.set_facecolor("#1a1a2e")
-    ax_price.grid(True, alpha=0.2)
-    ax_vol.grid(True, alpha=0.2)
+    ax_price.set_facecolor("white")
+    ax_vol.set_facecolor("white")
+    ax_price.grid(True, alpha=0.3)
+    ax_vol.grid(True, alpha=0.3)
 
     # 保存
     filename = f"{code}_{first_str}_{last_str}.png".replace("-", "")
     filepath = os.path.join(output_dir, filename)
-    fig.savefig(filepath, dpi=DPI, bbox_inches="tight", facecolor="#0f0f1a")
+    fig.savefig(filepath, dpi=DPI, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
@@ -183,7 +197,7 @@ def _draw_candlestick(ax, opens, closes, highs, lows, n):
     x = np.arange(n)
 
     # 影线
-    ax.vlines(x, lows, highs, colors="k", linewidths=0.5)
+    ax.vlines(x, lows, highs, colors="#888888", linewidths=0.5)
 
     # 实体
     rects = []
@@ -247,13 +261,25 @@ def _draw_trade_markers(ax, x, dates_s, trades):
     dates_list = list(dates_s)
     n = len(dates_list)
 
+    # 找到最后一个卖出日期，用于止损线/成本线的终点
+    last_sell_idx = 0
     for t in trades:
-        # 买入标记
-        buy_idx = _find_date_index(dates_list, t["buy_date"])
-        sell_idx = _find_date_index(dates_list, t["sell_date"]) if t.get("sell_date") else n - 1
-        end_idx = sell_idx if sell_idx is not None else n - 1
+        if t.get("sell_date"):
+            idx = _find_date_index(dates_list, t["sell_date"])
+            if idx is not None and idx > last_sell_idx:
+                last_sell_idx = idx
 
-        if buy_idx is not None:
+    # 按 buy_date 分组，每组只画一次买入标记
+    drawn_buy = set()
+    for t in trades:
+        buy_idx = _find_date_index(dates_list, t["buy_date"])
+        sell_idx = _find_date_index(dates_list, t["sell_date"]) if t.get("sell_date") else None
+        end_idx = sell_idx if sell_idx is not None else n - 1
+        is_partial = t.get("partial", False)
+        buy_key = (str(t["buy_date"]), t["buy_price"])
+
+        if buy_idx is not None and buy_key not in drawn_buy:
+            drawn_buy.add(buy_key)
             ax.plot(buy_idx, t["buy_price"], marker="^", color=COLOR_BUY,
                     markersize=14, markeredgecolor="white", markeredgewidth=1,
                     zorder=5)
@@ -264,29 +290,31 @@ def _draw_trade_markers(ax, x, dates_s, trades):
                 fontsize=7, color=COLOR_BUY, ha="center",
             )
 
-            # 止损线（橙色虚线，从买入到卖出）
+            # 止损线（橙色虚线，从买入到最后一个卖出点）
             sl = t.get("stop_loss")
             if sl:
-                ax.hlines(sl, buy_idx, end_idx, colors=COLOR_STOP_LOSS,
+                ax.hlines(sl, buy_idx, last_sell_idx, colors=COLOR_STOP_LOSS,
                           linestyles="dashed", linewidths=1.0, alpha=0.8, zorder=3)
                 ax.annotate(f"止损 {sl:.2f}", xy=(buy_idx, sl),
                             xytext=(-5, -12), textcoords="offset points",
                             fontsize=6, color=COLOR_STOP_LOSS, ha="right")
 
             # 成本线（蓝色点线）
-            ax.hlines(t["buy_price"], buy_idx, end_idx, colors=COLOR_COST,
+            ax.hlines(t["buy_price"], buy_idx, last_sell_idx, colors=COLOR_COST,
                       linestyles="dotted", linewidths=0.8, alpha=0.6, zorder=3)
 
-        # 卖出标记
+        # 卖出标记（每笔都画）
         sell_date = t.get("sell_date")
         if sell_date:
             sell_idx_s = _find_date_index(dates_list, sell_date)
             if sell_idx_s is not None:
                 sell_price = t["sell_price"]
                 reason = t.get("reason", "")
-                ax.plot(sell_idx_s, sell_price, marker="v", color=COLOR_SELL,
-                        markersize=14, markeredgecolor="white", markeredgewidth=1,
-                        zorder=5)
+                marker_color = COLOR_SELL_PARTIAL if is_partial else COLOR_SELL
+                marker_size = 10 if is_partial else 14
+                ax.plot(sell_idx_s, sell_price, marker="v", color=marker_color,
+                        markersize=marker_size, markeredgecolor="white",
+                        markeredgewidth=1, zorder=5)
                 label = f"卖 {sell_price:.2f}"
                 if reason:
                     label += f" ({reason})"
@@ -294,7 +322,7 @@ def _draw_trade_markers(ax, x, dates_s, trades):
                     label,
                     xy=(sell_idx_s, sell_price),
                     xytext=(0, 12), textcoords="offset points",
-                    fontsize=7, color=COLOR_SELL, ha="center",
+                    fontsize=7, color=marker_color, ha="center",
                 )
 
 

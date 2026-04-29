@@ -174,6 +174,16 @@ class PortfolioSimulator:
             equity = self._calc_equity(td)
             self._equity_curve.append(equity)
 
+        # 模拟结束：强制清仓所有未平仓持仓
+        if self._positions:
+            last_date = self._trading_days[-1]
+            for code in list(self._positions.keys()):
+                pos = self._positions[code]
+                idx = self._find_bar_index(code, last_date)
+                sig = self._all_signals.get(code)
+                price = float(sig["close"][idx]) if idx is not None and sig is not None else pos.buy_price
+                self._sell_position(code, pos, price, last_date, "模拟结束清仓")
+
     def _update_watchlist(self, date):
         """遍历全部股票，更新周线多头观察池"""
         cur_idx = self._td_index.get(date, 0)
@@ -457,6 +467,21 @@ class PortfolioSimulator:
         self._cash += proceeds
         pos.partial_proceeds += proceeds
         pos.size -= sell_size
+        self._trade_list.append({
+            "code": code,
+            "buy_date": pos.buy_date,
+            "sell_date": date,
+            "buy_price": pos.buy_price,
+            "sell_price": price,
+            "size": sell_size,
+            "pnl_pct": pnl,
+            "pnl_amount": proceeds - sell_size * pos.buy_price * (1 + self._commission),
+            "reason": reason,
+            "stop_loss": pos.stop_loss,
+            "white_at_buy": pos.white_at_buy,
+            "yellow_at_buy": pos.yellow_at_buy,
+            "partial": True,
+        })
         remaining_cost = total_cost - pos.partial_proceeds
         avg_cost = remaining_cost / pos.size if pos.size > 0 else 0
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 卖出 {code}  "
@@ -508,10 +533,11 @@ class PortfolioSimulator:
         else:
             sharpe = None
 
-        # 交易统计
-        total_trades = len(self._trade_list)
-        won = sum(1 for t in self._trade_list if t["pnl_pct"] > 0)
-        lost = sum(1 for t in self._trade_list if t["pnl_pct"] <= 0)
+        # 交易统计（仅统计清仓交易）
+        closed_trades = [t for t in self._trade_list if not t.get("partial")]
+        total_trades = len(closed_trades)
+        won = sum(1 for t in closed_trades if t["pnl_pct"] > 0)
+        lost = sum(1 for t in closed_trades if t["pnl_pct"] <= 0)
 
         return {
             "initial_cash": initial,
@@ -558,8 +584,8 @@ class PortfolioSimulator:
         if total > 0:
             _out(f"  胜率:        {won / total * 100:>11.2f}%")
 
-        # 交易明细（全部）
-        trades = report["trade_list"]
+        # 交易明细（仅清仓交易）
+        trades = [t for t in report["trade_list"] if not t.get("partial")]
         if trades:
             _out(f"\n  --- 交易明细 (共 {len(trades)} 笔) ---")
             for t in trades:
