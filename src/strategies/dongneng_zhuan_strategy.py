@@ -2,8 +2,8 @@
 
 策略逻辑：
 1. 基于动能评分选出股票池（KDJ/RSI动量、Z-Score、筹码流量、综合天命打分）
-2. 基于金砖选出股票池（砖型图、绿转强红共振、黄柱动能）
-3. 合并两个股票池，按"下大上小"排序取前N只
+2. 在动能股票池中基于金砖进一步筛选（砖型图、绿转强红共振、黄柱动能）
+3. 按金砖排名"下大上小"排序取前N只
 4. T+1 开盘买入，止损/2日不拉升/脱离成本5%持仓4-6天
 
 选股公式来源：thinking/动能砖.md
@@ -408,17 +408,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
                    & turnover_cond & non_limit_up)
 
     # ============================================================ #
-    #  排名分数："下大上小" → 砖大涨幅小                              #
+    #  最终信号：动能先筛 → 金砖再筛（串行过滤）                      #
     # ============================================================ #
-    rank_score = np.where(
-        jinzhuan_ok,
-        brick / np.maximum(pct_chg, 1.0),
-        np.where(dongneng_ok, base_mom / 10.0, 0.0))
+    final_ok = dongneng_ok & jinzhuan_ok
+
+    # 排名分数：金砖排名"下大上小"
+    rank_score = np.where(final_ok, brick / np.maximum(pct_chg, 1.0), 0.0)
 
     return {
         "dongneng_ok": dongneng_ok,
         "jinzhuan_ok": jinzhuan_ok,
-        "any_ok": dongneng_ok | jinzhuan_ok,
+        "any_ok": final_ok,
         "rank_score": rank_score,
         "close": C,
         "open": O,
@@ -540,8 +540,7 @@ def scan_all(tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS):
                 errors += 1
             elif sig is not None:
                 results.append(sig)
-                tag = "动能" if sig["dongneng"] and not sig["jinzhuan"] else (
-                    "金砖" if sig["jinzhuan"] and not sig["dongneng"] else "双重")
+                tag = "双重"
                 print(f"  {code}  [{tag}]  C={sig['close']:.2f}  "
                       f"涨幅={sig['pct_change']:.1f}%  砖={sig['brick']:.1f}  "
                       f"动能={sig['base_mom']:.1f}  评分={sig['visual_score']:.1f}")
@@ -561,8 +560,7 @@ def scan_all(tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS):
         print(f"\n  选股结果（按排名分数排序）")
         print(f"{'=' * 55}")
         for r in results:
-            tag = "动能" if r["dongneng"] and not r["jinzhuan"] else (
-                "金砖" if r["jinzhuan"] and not r["dongneng"] else "双重")
+            tag = "双重"
             print(f"  {r['code']}  [{tag}]  C={r['close']:.2f}  "
                   f"涨幅={r['pct_change']:.1f}%  砖={r['brick']:.1f}  "
                   f"排名={r['rank_score']:.2f}")
