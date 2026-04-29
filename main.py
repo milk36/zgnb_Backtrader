@@ -25,6 +25,9 @@ from config import (
     DNZH_T_PLUS_N,
     DNZH_MAX_HOLD_DAYS,
     DNZH_PROFIT_PCT,
+    DNZH_MINUTE_CONFIRM_BARS,
+    DNZH_MINUTE_ENTRY_ENABLED,
+    DNZH_MINUTE_EXIT_ENABLED,
     LOG_DIR,
     MARKET_INDEX_CODE,
 )
@@ -134,6 +137,12 @@ def main():
               f"每只 {DNZH_PER_POSITION:,.0f}")
         print(f"{'=' * 55}")
 
+        from src.data.minute_feed import MinuteFeed
+        if DNZH_MINUTE_ENTRY_ENABLED or DNZH_MINUTE_EXIT_ENABLED:
+            minute_feed = MinuteFeed()
+        else:
+            minute_feed = None
+
         sim = DongnengZhuanSimulator(
             all_signals=all_signals,
             trading_days=trading_days,
@@ -144,7 +153,11 @@ def main():
             t_plus_n=DNZH_T_PLUS_N,
             max_hold_days=DNZH_MAX_HOLD_DAYS,
             profit_pct=DNZH_PROFIT_PCT,
-            log_dir=LOG_DIR)
+            log_dir=LOG_DIR,
+            minute_feed=minute_feed,
+            minute_confirm_bars=DNZH_MINUTE_CONFIRM_BARS,
+            minute_entry_enabled=DNZH_MINUTE_ENTRY_ENABLED,
+            minute_exit_enabled=DNZH_MINUTE_EXIT_ENABLED)
         sim.run()
         report = sim.report()
         DongnengZhuanSimulator.print_report(report, log_file=sim._log_file)

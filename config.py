@@ -55,6 +55,11 @@ DNZH_T_PLUS_N = 2                    # 2日不拉升清仓
 DNZH_MAX_HOLD_DAYS = 5               # 脱离成本5%以上持仓最多5天
 DNZH_PROFIT_PCT = 5.0                # 脱离成本区百分比
 
+# 动能砖分钟级入场/出场参数
+DNZH_MINUTE_CONFIRM_BARS = 3         # 前3根5分钟线(9:30-9:45)确认入场
+DNZH_MINUTE_ENTRY_ENABLED = True     # 启用分钟级入场确认
+DNZH_MINUTE_EXIT_ENABLED = True      # 启用分钟级止损/涨停检查
+
 # 日志
 LOG_DIR = "logs"
 

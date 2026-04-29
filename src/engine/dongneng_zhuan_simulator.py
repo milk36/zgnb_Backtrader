@@ -2,10 +2,10 @@
 
 交易规则：
 - 总资金10万，单只最多5万，最多持仓2只
-- 信号日T检测 → T+1开盘价买入
+- 信号日T检测 → T+1分钟线确认买入（无分钟线时降级为开盘价）
 - 四级退出（优先级从高到低）：
-  1. 止损：买入K线最低价
-  2. 涨停清仓：当日最高触及涨停价即清仓
+  1. 止损：分钟级监控买入K线最低价
+  2. 涨停清仓：分钟级监控涨停价
   3. 2日不拉升（价格<=买入价）清仓
   4. 脱离成本5%以上，持仓最多4-6天
 - 按"下大上小"排名取前N只买入
@@ -23,7 +23,7 @@ class Position:
 
     __slots__ = (
         "code", "buy_date", "buy_price", "buy_low",
-        "stop_loss", "size", "initial_size",
+        "stop_loss", "size", "initial_size", "confirmed_minute",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low, stop_loss, size):
@@ -34,6 +34,7 @@ class Position:
         self.stop_loss = stop_loss
         self.size = size
         self.initial_size = size
+        self.confirmed_minute = False
 
 
 class DongnengZhuanSimulator:
@@ -43,7 +44,9 @@ class DongnengZhuanSimulator:
                  initial_cash=100_000, max_positions=2,
                  per_position_cash=50_000, commission=0.0003,
                  t_plus_n=2, max_hold_days=5, profit_pct=5.0,
-                 log_dir="logs"):
+                 log_dir="logs",
+                 minute_feed=None, minute_confirm_bars=3,
+                 minute_entry_enabled=True, minute_exit_enabled=True):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._initial_cash = initial_cash
@@ -53,6 +56,10 @@ class DongnengZhuanSimulator:
         self._t_plus_n = t_plus_n
         self._max_hold_days = max_hold_days
         self._profit_pct = profit_pct
+        self._minute_feed = minute_feed
+        self._confirm_bars = max(1, minute_confirm_bars)
+        self._minute_entry = minute_entry_enabled and (minute_feed is not None)
+        self._minute_exit = minute_exit_enabled and (minute_feed is not None)
 
         # 日志
         os.makedirs(log_dir, exist_ok=True)
@@ -109,6 +116,10 @@ class DongnengZhuanSimulator:
                       f"每只={self._per_position_cash:,.0f}  "
                       f"最多{self._max_positions}只  "
                       f"T+{self._t_plus_n}  最大持仓{self._max_hold_days}天")
+            mode_entry = "分钟确认" if self._minute_entry else "日线开盘"
+            mode_exit = "分钟监控" if self._minute_exit else "日线检查"
+            self._log(f"  [动能砖] 入场={mode_entry}  出场={mode_exit}  "
+                      f"确认bar数={self._confirm_bars}")
 
         for td in self._trading_days:
             # 1. 执行T+1待买入（用今日开盘价）
@@ -124,12 +135,15 @@ class DongnengZhuanSimulator:
             equity = self._calc_equity(td)
             self._equity_curve.append(equity)
 
+            # 5. 清理分钟线缓存
+            if self._minute_feed is not None:
+                self._minute_feed.clear_cache()
+
     def _execute_pending_buys(self, date):
-        """执行前一日信号对应的T+1开盘买入"""
+        """执行T+1买入，支持5分钟线确认入场"""
         if not self._pending_buys:
             return
 
-        # 按排名分数降序排列
         pending = sorted(self._pending_buys, key=lambda x: x[1], reverse=True)
         self._pending_buys = []
 
@@ -142,7 +156,6 @@ class DongnengZhuanSimulator:
                 break
             if code in self._positions:
                 continue
-            # 止损冷却
             if code in self._cooldown:
                 if cur_idx - self._cooldown[code] < 5:
                     continue
@@ -156,34 +169,67 @@ class DongnengZhuanSimulator:
             if idx is None:
                 continue
 
-            # 使用今日开盘价
-            price = sig["open"][idx]
-            if price <= 0:
+            daily_open = sig["open"][idx]
+            if daily_open <= 0:
                 continue
 
+            buy_price = None
+            buy_reason = ""
+            confirmed = False
+
+            # --- 分钟线确认入场 ---
+            if self._minute_entry:
+                bars = self._minute_feed.get_minute_bars(code, date)
+                if bars is not None and len(bars) >= self._confirm_bars:
+                    first_n = bars.head(self._confirm_bars)
+
+                    for i in range(len(first_n)):
+                        bar = first_n.iloc[i]
+                        bar_close = float(bar["close"])
+                        bar_open = float(bar["open"])
+
+                        # 确认条件：阳线 且 收盘>=日线开盘价
+                        if bar_close > bar_open and bar_close >= daily_open:
+                            buy_price = bar_close
+                            buy_reason = f"分钟确认(bar{i+1})"
+                            confirmed = True
+                            break
+
+                    if not confirmed:
+                        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] "
+                                  f"放弃 {code}  开盘急跌未确认  "
+                                  f"排名={rank_score:.2f}")
+                        continue
+
+            # --- 降级：日线开盘价 ---
+            if buy_price is None:
+                buy_price = daily_open
+                buy_reason = "开盘"
+
             # 计算可买股数
-            buy_cost = price * (1 + self._commission)
+            buy_cost = buy_price * (1 + self._commission)
             shares = int(self._per_position_cash / buy_cost / 100) * 100
             if shares <= 0:
                 continue
 
-            total_cost = shares * price * (1 + self._commission)
+            total_cost = shares * buy_price * (1 + self._commission)
             if total_cost > self._cash:
                 shares = int(self._cash / buy_cost / 100) * 100
                 if shares <= 0:
                     continue
-                total_cost = shares * price * (1 + self._commission)
+                total_cost = shares * buy_price * (1 + self._commission)
 
             low_val = sig["low"][idx]
             pos = Position(
-                code=code, buy_date=date, buy_price=price,
+                code=code, buy_date=date, buy_price=buy_price,
                 buy_low=low_val, stop_loss=low_val, size=shares)
+            pos.confirmed_minute = confirmed
             self._positions[code] = pos
             self._cash -= total_cost
 
             self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] 买入 {code}  "
-                      f"价格={price:.2f}(开盘)  数量={shares}  止损={low_val:.2f}  "
-                      f"排名={rank_score:.2f}  "
+                      f"价格={buy_price:.2f}({buy_reason})  数量={shares}  "
+                      f"止损={low_val:.2f}  排名={rank_score:.2f}  "
                       f"持仓={len(self._positions)}/{self._max_positions}  "
                       f"现金={self._cash:,.0f}")
 
@@ -229,7 +275,7 @@ class DongnengZhuanSimulator:
             self._pending_buys.append((code, score, date))
 
     def _check_exits(self, date):
-        """检查所有持仓的卖出条件"""
+        """检查所有持仓的卖出条件，支持分钟级止损/涨停监控"""
         to_remove = []
         cur_idx = self._td_index.get(date, 0)
 
@@ -241,60 +287,97 @@ class DongnengZhuanSimulator:
             if idx is None:
                 continue
             try:
-                price = sig["close"][idx]
+                daily_close = sig["close"][idx]
+                daily_high = sig["high"][idx]
+                prev_close = sig["close"][idx - 1] if idx >= 1 else 0
             except (IndexError, TypeError):
                 continue
-            if price <= 0:
+            if daily_close <= 0:
                 continue
 
-            # 持仓交易日数
             buy_idx = self._td_index.get(pos.buy_date)
             if buy_idx is not None and cur_idx is not None:
                 days_held = cur_idx - buy_idx
             else:
                 days_held = (date - pos.buy_date).days
 
-            pct_gain = (price - pos.buy_price) / pos.buy_price * 100
+            pct_gain = (daily_close - pos.buy_price) / pos.buy_price * 100
 
-            # 1. 止损：买入K线最低价
-            if price <= pos.stop_loss:
+            # 涨停价计算
+            is_tech = code[:2] in ("30", "68")
+            limit_pct = 1.20 if is_tech else 1.10
+            limit_up_price = round(prev_close * limit_pct, 2) if prev_close > 0 else 0
+
+            # --- 分钟级止损/涨停监控 ---
+            minute_exited = False
+            if self._minute_exit:
+                bars = self._minute_feed.get_minute_bars(code, date)
+                if bars is not None and len(bars) > 0:
+                    for i in range(len(bars)):
+                        bar = bars.iloc[i]
+                        bar_low = float(bar["low"])
+                        bar_high = float(bar["high"])
+                        bar_close = float(bar["close"])
+
+                        # 止损
+                        if bar_low <= pos.stop_loss:
+                            sell_price = min(bar_close, pos.stop_loss)
+                            self._cooldown[code] = cur_idx
+                            self._sell_position(code, pos, sell_price, date,
+                                                "止损(分钟)")
+                            to_remove.append(code)
+                            minute_exited = True
+                            break
+
+                        # 涨停清仓
+                        if limit_up_price > 0 and bar_high >= limit_up_price:
+                            bar_pct = (bar_close - pos.buy_price) / pos.buy_price * 100
+                            self._cooldown[code] = cur_idx
+                            self._sell_position(code, pos, bar_close, date,
+                                                f"涨停清仓(分钟,盈利{bar_pct:.1f}%)")
+                            to_remove.append(code)
+                            minute_exited = True
+                            break
+
+            if minute_exited:
+                continue
+
+            # --- 日线级别检查 ---
+
+            # 1. 止损（日线降级）
+            if daily_close <= pos.stop_loss:
                 self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, price, date, "止损")
+                self._sell_position(code, pos, daily_close, date, "止损")
                 to_remove.append(code)
                 continue
 
-            # 2. 涨停立即清仓
-            if idx >= 1:
-                prev_close = sig["close"][idx - 1]
-                if prev_close > 0:
-                    is_tech = code[:2] in ("30", "68")
-                    limit_pct = 1.20 if is_tech else 1.10
-                    limit_up_price = round(prev_close * limit_pct, 2)
-                    if sig["high"][idx] >= limit_up_price:
-                        self._cooldown[code] = cur_idx
-                        self._sell_position(code, pos, price, date,
-                                            f"涨停清仓(盈利{pct_gain:.1f}%)")
-                        to_remove.append(code)
-                        continue
+            # 2. 涨停清仓（日线降级）
+            if limit_up_price > 0 and daily_high >= limit_up_price:
+                self._cooldown[code] = cur_idx
+                self._sell_position(code, pos, daily_close, date,
+                                    f"涨停清仓(盈利{pct_gain:.1f}%)")
+                to_remove.append(code)
+                continue
 
             # 3. T+N不拉升清仓
-            if days_held >= self._t_plus_n and price <= pos.buy_price:
+            if days_held >= self._t_plus_n and daily_close <= pos.buy_price:
                 self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, price, date,
+                self._sell_position(code, pos, daily_close, date,
                                     f"T+{days_held}未拉升清仓")
                 to_remove.append(code)
                 continue
 
-            # 4. 脱离成本 profit_pct% 以上，持仓最多 max_hold_days 天
+            # 4. 盈利止盈
             if pct_gain >= self._profit_pct and days_held >= self._max_hold_days:
                 self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, price, date,
+                self._sell_position(code, pos, daily_close, date,
                                     f"盈利{pct_gain:.1f}%持仓{days_held}天止盈")
                 to_remove.append(code)
                 continue
 
-        for code in to_remove:
-            del self._positions[code]
+        for code in set(to_remove):
+            if code in self._positions:
+                del self._positions[code]
 
     def _sell_position(self, code, pos, price, date, reason):
         """全部卖出"""
