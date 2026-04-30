@@ -4,7 +4,6 @@
 无分钟数据时返回 None，模拟器自动降级为日线逻辑。
 """
 
-import numpy as np
 import pandas as pd
 from mootdx.reader import Reader
 

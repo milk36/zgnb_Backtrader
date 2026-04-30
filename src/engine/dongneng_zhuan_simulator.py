@@ -351,7 +351,10 @@ class DongnengZhuanSimulator:
                         # 3. 涨幅2%卖1/4
                         if not pos.partial_sold and bar_pct >= 2.0:
                             self._partial_sell(code, pos, bar_close, date)
-                            # partial_sell 修改了 pos，继续检查后续 bar
+                            if pos.size <= 0:
+                                to_remove.append(code)
+                                minute_exited = True
+                                break
 
             if minute_exited:
                 continue
@@ -376,6 +379,9 @@ class DongnengZhuanSimulator:
             # 3. 涨幅2%卖1/4（日线降级）
             if not pos.partial_sold and pct_gain >= 2.0:
                 self._partial_sell(code, pos, daily_close, date)
+                if pos.size <= 0:
+                    to_remove.append(code)
+                    continue
 
             # 4. T+N不拉升清仓
             if days_held >= self._t_plus_n and daily_close <= pos.buy_price:
@@ -431,6 +437,8 @@ class DongnengZhuanSimulator:
 
     def _sell_position(self, code, pos, price, date, reason):
         """全部卖出"""
+        if pos.size <= 0:
+            return
         proceeds = pos.size * price * (1 - self._commission)
         total_cost = pos.size * pos.buy_price * (1 + self._commission)
         pnl = (proceeds - total_cost) / total_cost * 100
