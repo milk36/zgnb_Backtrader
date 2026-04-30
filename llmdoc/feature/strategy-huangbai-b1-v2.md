@@ -70,6 +70,7 @@ MACD 参数由 `config.py` 配置：`MARKET_MACD_FAST=12`, `MARKET_MACD_SLOW=26`
 - `scan_all()` 返回元组 `(results, market_macd_ok)`，与 V1 的 `results` 不同，调用方需注意解包
 - `preload_all_signals()` 返回三元组，V1 返回二元组
 - `_compute_signals()` 与 `_compute_all_bar_signals()` 中的个股指标逻辑与 V1 相同，大盘 MACD 在调用方或模拟器层面过滤
+- `_scan_one_all_bars()` 返回的信号字典包含 `avg_amount_20` 字段（20日成交额均值），供 PortfolioSimulator 选股排序使用
 - V1 文档中关于 B1 七子条件、出场逻辑、调试参数的说明完全适用于 V2
 
 ### 代码审查修复记录（2026-04）

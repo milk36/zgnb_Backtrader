@@ -243,16 +243,19 @@ class PortfolioSimulator:
                     score = sig["shrink_score"][idx]
                     if np.isnan(score):
                         score = 1.0
-                    candidates.append((code, score, idx, sig))
+                    avg_amt = sig.get("avg_amount_20", np.zeros(idx + 1))[idx]
+                    if np.isnan(avg_amt):
+                        avg_amt = 0.0
+                    candidates.append((code, score, avg_amt, idx, sig))
             except (IndexError, TypeError):
                 continue
 
         if not candidates:
             return
 
-        # 按 shrink_score 升序（越小=越缩量）
-        candidates.sort(key=lambda x: x[1])
-        code, score, idx, sig = candidates[0]
+        # 按 shrink_score 升序（越小=越缩量），avg_amount_20 降序（越大=市值越大优先）
+        candidates.sort(key=lambda x: (x[1], -x[2]))
+        code, score, avg_amt, idx, sig = candidates[0]
 
         price = sig["close"][idx]
         if price <= 0:
@@ -321,6 +324,7 @@ class PortfolioSimulator:
                 high = sig["high"][idx]
                 low = sig["low"][idx]
                 white_val = sig["white"][idx]
+                yellow_val = sig["yellow"][idx]
             except (IndexError, TypeError):
                 continue
 
@@ -378,30 +382,41 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 4. 半仓持股模式（仅盈转亏/跌破白线可清仓，不再触发中阳）
+            # 4. 半仓持股模式（跌破白线/摊薄成本价/黄线可清仓）
             if pos.hold_until_below_white:
                 sold = False
                 if real_gain <= 20:
-                    # 盈利20%以内：盈转亏清仓（基于摊薄成本价判断）
-                    if price <= avg_cost:
+                    # 盈利20%以内：跌破白线或摊薄成本价清仓
+                    if price < white_val or price <= avg_cost:
                         cur_idx = self._td_index.get(date)
                         if cur_idx is not None:
                             self._cooldown[code] = cur_idx
-                        self._sell_position(code, pos, price, date, "半仓盈转亏清仓")
+                        reason = "半仓跌破白线" if price < white_val else "半仓盈转亏清仓"
+                        self._sell_position(code, pos, price, date, reason)
                         to_remove.append(code)
                         sold = True
                 else:
-                    # 盈利>20%：跌破白线清仓
-                    if price < white_val:
-                        cur_idx = self._td_index.get(date)
-                        if cur_idx is not None:
-                            self._cooldown[code] = cur_idx
+                    # 盈利>20%：黄白线差值≤5%则跌破黄线清仓，否则跌破白线清仓
+                    wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
+                    if wy_gap_pct <= 5:
+                        if price < yellow_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            self._sell_position(code, pos, price, date, "半仓跌破黄线")
+                            to_remove.append(code)
+                            sold = True
+                    else:
+                        if price < white_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
                         self._sell_position(code, pos, price, date, "半仓跌破白线")
                         to_remove.append(code)
                         sold = True
                 if sold:
                     continue
-                # 未清仓：仍允许涨停卖1/2，但跳过中阳
+                # 未清仓：仍允许涨停卖1/2和中阳卖1/3
 
             # 5. 涨停卖1/2（半仓模式下仍可触发，不受中阳标记限制）
             if idx >= 1:
@@ -417,16 +432,18 @@ class PortfolioSimulator:
                                 pos.hold_until_below_white = True
                         continue
 
-            # 6. 中阳卖1/3（半仓模式下不触发）
-            if not pos.hold_until_below_white:
+            # 6. 中阳卖1/3（半仓模式使用更高阈值）
+            if pos.hold_until_below_white:
+                mid_yang = 15 if self._stock_type == "tech" else 8
+            else:
                 mid_yang = 10 if self._stock_type == "tech" else 5
-                if pct_gain >= mid_yang:
-                    sell_size = max(1, pos.size // 3)
-                    if sell_size < pos.size:
-                        self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
-                        pos.mid_yang_triggered = True
-                        if pos.size <= pos.initial_size // 2:
-                            pos.hold_until_below_white = True
+            if pct_gain >= mid_yang:
+                sell_size = max(1, pos.size // 3)
+                if sell_size < pos.size:
+                    self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
+                    pos.mid_yang_triggered = True
+                    if pos.size <= pos.initial_size // 2:
+                        pos.hold_until_below_white = True
 
         for code in to_remove:
             del self._positions[code]

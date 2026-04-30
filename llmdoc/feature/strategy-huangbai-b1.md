@@ -63,6 +63,8 @@
 
 扫描逻辑作为策略文件的模块级函数实现，独立于 Backtrader 引擎运行。直接使用 MyTT 计算指标（不经过逐 bar 机制），对全部 A 股执行三级过滤，命中结果按缩量评分排序输出。
 
+`_scan_one_all_bars()` 返回的信号字典中包含 `avg_amount_20` 字段（20日成交额均值），作为流通市值的代理指标，供 PortfolioSimulator 选股排序使用。
+
 | 函数 | 说明 |
 |------|------|
 | `_get_all_codes(tdxdir)` | 从通达信本地目录（`vipdoc/sz/lday`、`vipdoc/sh/lday`）提取全部 A 股代码（去重、去指数），约 5202 只 |
@@ -79,14 +81,14 @@
 
 | 函数/类 | 说明 |
 |---------|------|
-| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score/open/volume 等），基于 `indicators()` 的逻辑 |
+| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score/open/volume/avg_amount_20 等），基于 `indicators()` 的逻辑 |
 | `_scan_one_all_bars(code, params)` | 并行加载单只股票数据并调用 `_compute_all_bar_signals()` |
 | `preload_all_signals(start, end, stock_type, max_workers)` | 用 ProcessPoolExecutor 并行预计算全部 A 股的每 bar 信号，返回 `(all_signals, trading_days)` |
 | `PortfolioSimulator`（`src/engine/portfolio_simulator.py`） | 组合级日频模拟引擎：100万资金、最多10只、每只10万，周更观察池+日检查买卖 |
 
 组合模拟流程：
 1. Phase 1: `preload_all_signals()` 并行预计算全部 A 股信号（~55秒，16 workers）
-2. Phase 2: `PortfolioSimulator.run()` 逐日模拟（周一更新观察池 → 每日检查金叉+B1 → 买入缩量最优 → 检查卖出条件）
+2. Phase 2: `PortfolioSimulator.run()` 逐日模拟（周一更新观察池 → 每日检查金叉+B1 → 按(shrink_score升序, avg_amount_20降序)双键排序买入最优 → 检查卖出条件）
 
 卖出优先级：止损 → T+N没涨 → 盈利100%清仓 → 半仓持股模式 → 涨停卖1/2（中阳未触发时）→ 中阳卖1/3
 

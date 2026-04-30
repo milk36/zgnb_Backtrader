@@ -29,6 +29,7 @@ from config import (
     TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS, STOCK_TYPE,
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
+    DNZH_MIN_MARKET_CAP,
 )
 
 
@@ -57,6 +58,68 @@ def _rolling_sum(X, N):
 def _rolling_std(X, N):
     """STD(X, N) - N周期标准差 (population)"""
     return pd.Series(X).rolling(N, min_periods=1).std(ddof=0).values
+
+
+def _load_capital_data(tdxdir=TDX_DIR):
+    """从通达信 base.dbf 加载全部A股流通股本（万股）
+
+    Returns:
+        dict[str, float]: {code: LTAG_in_wangu} or None if unavailable
+    """
+    import struct
+    path = os.path.join(tdxdir, 'T0002', 'hq_cache', 'base.dbf')
+    if not os.path.isfile(path):
+        return None
+    try:
+        capital = {}
+        with open(path, 'rb') as f:
+            f.read(1)  # version
+            f.read(3)  # date
+            num_records = struct.unpack('<I', f.read(4))[0]
+            header_size = struct.unpack('<H', f.read(2))[0]
+            record_size = struct.unpack('<H', f.read(2))[0]
+            f.read(20)
+
+            fields = []
+            while True:
+                fd = f.read(32)
+                if len(fd) < 32 or fd[0] == 0x0D:
+                    break
+                name = fd[:11].decode('gbk', errors='replace').strip('\x00')
+                size = fd[16]
+                fields.append((name, size))
+
+            offsets = {}
+            offset = 1  # skip deletion flag
+            for name, size in fields:
+                offsets[name] = offset
+                offset += size
+
+            f.seek(header_size)
+            gpdm_off = offsets.get('GPDM')
+            ltag_off = offsets.get('LTAG')
+            if gpdm_off is None or ltag_off is None:
+                return None
+            gpdm_size = 6
+            ltag_size = 14
+
+            for _ in range(num_records):
+                rec = f.read(record_size)
+                if len(rec) < record_size:
+                    break
+                code = rec[gpdm_off:gpdm_off + gpdm_size].decode(
+                    'gbk', errors='replace').strip()
+                raw = rec[ltag_off:ltag_off + ltag_size].decode(
+                    'gbk', errors='replace').strip()
+                try:
+                    ltag = float(raw) if raw else 0
+                except ValueError:
+                    ltag = 0
+                if code and ltag > 0:
+                    capital[code] = ltag
+        return capital
+    except Exception:
+        return None
 
 
 # ================================================================== #
@@ -164,7 +227,16 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     hard_mask = ((up_shadow < 0.30) & (dn_shadow < 0.35)
                  & (pct_chg >= 3.0) & (ret_z >= 0.8))
 
-    dongneng_ok = is_yang & hard_mask & (mask_a | mask_b | mask_c | mask_d)
+    # 流通市值过滤
+    capital_shares = params.get("capital_shares")
+    min_market_cap = params.get("min_market_cap", 0)
+    if capital_shares and capital_shares > 0 and min_market_cap > 0:
+        market_cap = capital_shares * C / 10000  # 万股×元/股/10000 = 亿元
+        liutong_mask = market_cap > min_market_cap
+    else:
+        liutong_mask = np.ones(n, dtype=bool)
+
+    dongneng_ok = is_yang & hard_mask & liutong_mask & (mask_a | mask_b | mask_c | mask_d)
 
     # ============================================================ #
     #  金砖选股                                                      #
@@ -408,9 +480,21 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
                    & turnover_cond & non_limit_up)
 
     # ============================================================ #
-    #  最终信号：动能先筛 → 金砖再筛（串行过滤）                      #
+    #  筹码密集过滤（COST近似）                                       #
     # ============================================================ #
-    final_ok = dongneng_ok & jinzhuan_ok
+    _period_chip = 60
+    _sum_cv60 = _rolling_sum(C * V, _period_chip)
+    _sum_v60 = _rolling_sum(V, _period_chip)
+    _vwap60 = _sum_cv60 / np.maximum(_sum_v60, 1)
+    _spread60 = (HHV(C, _period_chip) - LLV(C, _period_chip)) / np.maximum(_vwap60, 0.001) * 100
+    _conc_low60 = _spread60 == LLV(_spread60, _period_chip)
+    _price_near_center = ABS(C - _vwap60) / np.maximum(_vwap60, 0.001) <= 0.10
+    chip_dense = _conc_low60 & _price_near_center
+
+    # ============================================================ #
+    #  最终信号：动能先筛 → 金砖再筛 → 筹码密集（串行过滤）           #
+    # ============================================================ #
+    final_ok = dongneng_ok & jinzhuan_ok & chip_dense
 
     # 排名分数：金砖排名"下大上小"
     rank_score = np.where(final_ok, brick / pct_chg, 0.0)
@@ -431,6 +515,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
         "visual_score": visual_score,
         "yellow": yellow,
         "white": white,
+        "chip_dense": chip_dense,
     }
 
 
@@ -493,13 +578,17 @@ def _scan_one(code, params):
         if df is None or len(df) < 300:
             return code, None, False
         df = df.sort_index()
+        stock_params = dict(params)
+        capital_data = params.get("capital_data")
+        if capital_data:
+            stock_params["capital_shares"] = capital_data.get(code)
         sig = _compute_signals(
             df["close"].values.astype(float),
             df["high"].values.astype(float),
             df["low"].values.astype(float),
             df["open"].values.astype(float),
             df["volume"].values.astype(float),
-            df.index, code, params)
+            df.index, code, stock_params)
         if sig is not None and sig["any"]:
             return code, sig, False
         return code, None, False
@@ -515,11 +604,20 @@ def scan_all(tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS):
     total = len(codes)
     print(f"扫描 {total} 只A股... (workers={max_workers or 'auto'})")
 
+    capital_data = _load_capital_data(tdxdir)
+    if capital_data:
+        print(f"  流通市值过滤: 已加载 {len(capital_data)} 只股票流通股本"
+              f" (>{DNZH_MIN_MARKET_CAP}亿)")
+    else:
+        print(f"  流通市值过滤: base.dbf 不可用，跳过")
+
     params = {
         "m1": HUANGBAI_M1, "m2": HUANGBAI_M2,
         "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
         "n": HUANGBAI_N, "m": HUANGBAI_M,
         "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
+        "min_market_cap": DNZH_MIN_MARKET_CAP,
+        "capital_data": capital_data,
     }
 
     results = []
@@ -579,13 +677,17 @@ def _scan_one_all_bars(code, params):
         if df is None or len(df) < 300:
             return code, None, False
         df = df.sort_index()
+        stock_params = dict(params)
+        capital_data = params.get("capital_data")
+        if capital_data:
+            stock_params["capital_shares"] = capital_data.get(code)
         signals = _compute_all_bar_signals(
             df["close"].values.astype(float),
             df["high"].values.astype(float),
             df["low"].values.astype(float),
             df["open"].values.astype(float),
             df["volume"].values.astype(float),
-            df.index, code, params)
+            df.index, code, stock_params)
         return code, signals, False
     except Exception:
         return code, None, True
@@ -607,11 +709,20 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
     total = len(codes)
     print(f"预加载 {total} 只A股信号... (workers={max_workers or 'auto'})")
 
+    capital_data = _load_capital_data(tdxdir)
+    if capital_data:
+        print(f"  流通市值过滤: 已加载 {len(capital_data)} 只股票流通股本"
+              f" (>{DNZH_MIN_MARKET_CAP}亿)")
+    else:
+        print(f"  流通市值过滤: base.dbf 不可用，跳过")
+
     params = {
         "m1": HUANGBAI_M1, "m2": HUANGBAI_M2,
         "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
         "n": HUANGBAI_N, "m": HUANGBAI_M,
         "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
+        "min_market_cap": DNZH_MIN_MARKET_CAP,
+        "capital_data": capital_data,
     }
 
     all_signals = {}

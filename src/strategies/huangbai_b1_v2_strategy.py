@@ -1097,6 +1097,10 @@ def _scan_one_all_bars(code, params):
             df["open"].values.astype(float),
             df["volume"].values.astype(float),
             df.index, params)
+        if signals is not None:
+            amount = df["amount"].values.astype(float)
+            signals["avg_amount_20"] = pd.Series(amount).rolling(
+                20, min_periods=1).mean().values
         return code, signals, False
     except Exception as e:
         return code, {"error": str(e)}, True

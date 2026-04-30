@@ -290,6 +290,10 @@ class DongnengZhuanSimulator:
         cur_idx = self._td_index.get(date, 0)
 
         for code, pos in list(self._positions.items()):
+            # T+1: 当日买入的股票不能当日卖出
+            if pos.buy_date == date:
+                continue
+
             sig = self._all_signals.get(code)
             if sig is None:
                 continue
