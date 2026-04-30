@@ -149,6 +149,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         ("skip_gc", False),
         ("skip_market_macd", False),
         ("skip_stock_macd", False),
+        ("skip_vol_expand", False),
     )
 
     def __init__(self):
@@ -356,6 +357,10 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         # 个股MACD多头过滤（暂未启用，预留接口）
         self._stock_macd_bullish = np.ones(len(C), dtype=bool)
 
+        # 前期放量上涨过滤：近期涨势必须有放量支撑，排除缩量上涨
+        vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
+        self._vol_expand_ok = COUNT(vol_expand, 20) >= 2
+
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
     # ------------------------------------------------------------------ #
@@ -383,13 +388,15 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         gc_ok = self.p.skip_gc or self._recent_gc[idx]
         b1_ok = self._b1[idx]
         stock_macd_ok = self.p.skip_stock_macd or self._stock_macd_bullish[idx]
+        vol_expand_ok = self.p.skip_vol_expand or self._vol_expand_ok[idx]
 
         if self.p.print_log:
-            self._print_filter_result(dt, weekly_ok, gc_ok, b1_ok, market_macd_ok, stock_macd_ok)
+            self._print_filter_result(dt, weekly_ok, gc_ok, b1_ok, market_macd_ok,
+                                      stock_macd_ok, vol_expand_ok)
 
         if not market_macd_ok:
             return
-        if not weekly_ok or not gc_ok or not b1_ok or not stock_macd_ok:
+        if not weekly_ok or not gc_ok or not b1_ok or not stock_macd_ok or not vol_expand_ok:
             return
 
         if self._last_sl_bar is not None and (len(self) - self._last_sl_bar) < 10:
@@ -511,7 +518,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             print(f"[{dt.isoformat()}] {sym}  [B1V2] {txt}")
 
     def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok,
-                             stock_macd_ok):
+                             stock_macd_ok, vol_expand_ok=True):
         sym = self.data._name or "?"
         idx = len(self) - 1
         w = "Y" if weekly_ok else "N"
@@ -519,14 +526,16 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         b = "Y" if b1_ok else "N"
         m = "Y" if market_macd_ok else "N"
         s = "Y" if stock_macd_ok else "N"
-        all_pass = market_macd_ok and weekly_ok and gc_ok and b1_ok and stock_macd_ok
+        v = "Y" if vol_expand_ok else "N"
+        all_pass = (market_macd_ok and weekly_ok and gc_ok and b1_ok
+                    and stock_macd_ok and vol_expand_ok)
 
         if not b1_ok and not all_pass:
             return
 
         tag = " <<< SELECT" if all_pass else ""
         print(f"[{dt.isoformat()}] {sym}  [B1V2] 大盘={m}  周线={w}  金叉={g}  "
-              f"个股MACD={s}  B1={b}  "
+              f"放量={v}  个股MACD={s}  B1={b}  "
               f"C={self.data.close[0]:.2f}  "
               f"J={self.kdj._j[idx]:.1f}  RSI={self._rsi[idx]:.1f}"
               f"{tag}")
@@ -605,9 +614,14 @@ def _compute_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_ok = True
 
-    if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok):
+    # 前期放量上涨过滤
+    vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
+    vol_expand_ok = COUNT(vol_expand, 20)[i] >= 2
+
+    if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
                 "market_macd": True, "b1": False, "stock_macd": stock_macd_ok,
+                "vol_expand": vol_expand_ok,
                 "close": C[i], "J": J[i], "RSI": rsi[i],
                 "shrink_score": 0}
 
@@ -727,7 +741,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
         b1 = True
 
     return {"weekly": True, "gc": True, "market_macd": True, "b1": b1,
-            "stock_macd": stock_macd_ok,
+            "stock_macd": stock_macd_ok, "vol_expand": vol_expand_ok,
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
@@ -761,7 +775,8 @@ def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
         weekly_ok = skip_weekly or sig["weekly"]
         gc_ok = skip_gc or sig["gc"]
         stock_macd_ok = sig.get("stock_macd", True)
-        if sig["b1"] and weekly_ok and gc_ok and stock_macd_ok and market_macd_ok:
+        vol_expand_ok = sig.get("vol_expand", True)
+        if sig["b1"] and weekly_ok and gc_ok and stock_macd_ok and vol_expand_ok and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -1044,6 +1059,10 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_bullish = np.ones(len(C), dtype=bool)
 
+    # 前期放量上涨过滤
+    vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
+    vol_expand_ok = COUNT(vol_expand, 20) >= 2
+
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
@@ -1051,6 +1070,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "b1": b1,
         "shrink_score": shrink_score,
         "stock_macd_bullish": stock_macd_bullish,
+        "vol_expand_ok": vol_expand_ok,
         "white": white,
         "yellow": yellow,
         "bbi": bbi,

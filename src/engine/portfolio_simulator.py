@@ -238,7 +238,8 @@ class PortfolioSimulator:
                 gc_ok = sig["recent_gc"][idx]
                 b1_ok = sig["b1"][idx]
                 stock_macd_ok = sig.get("stock_macd_bullish", np.ones(idx + 1, dtype=bool))[idx]
-                if gc_ok and b1_ok and stock_macd_ok:
+                vol_expand_ok = sig.get("vol_expand_ok", np.ones(idx + 1, dtype=bool))[idx]
+                if gc_ok and b1_ok and stock_macd_ok and vol_expand_ok:
                     score = sig["shrink_score"][idx]
                     if np.isnan(score):
                         score = 1.0
