@@ -35,6 +35,7 @@ from config import (
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
     HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
+    HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 
@@ -359,7 +360,11 @@ class HuangBaiB1V2Strategy(BaseStrategy):
 
         # 前期放量上涨过滤：近期涨势必须有放量支撑，排除缩量上涨
         vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-        self._vol_expand_ok = COUNT(vol_expand, 20) >= 2
+        # 缩量上涨：收盘价上涨但成交量低于前一日
+        shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
+        # 放量上涨天数必须 > 缩量上涨天数，且至少N天放量
+        _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
+        self._vol_expand_ok = (COUNT(vol_expand, _vep) >= _vem) & (COUNT(vol_expand, _vep) > COUNT(shrink_rise, _vep))
 
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
@@ -614,9 +619,13 @@ def _compute_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_ok = True
 
-    # 前期放量上涨过滤
+    # 前期放量上涨过滤 + 排除缩量上涨
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-    vol_expand_ok = COUNT(vol_expand, 20)[i] >= 2
+    shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
+    _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
+    vol_expand_cnt = COUNT(vol_expand, _vep)[i]
+    shrink_rise_cnt = COUNT(shrink_rise, _vep)[i]
+    vol_expand_ok = (vol_expand_cnt >= _vem) and (vol_expand_cnt > shrink_rise_cnt)
 
     if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
@@ -1059,9 +1068,11 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_bullish = np.ones(len(C), dtype=bool)
 
-    # 前期放量上涨过滤
+    # 前期放量上涨过滤 + 排除缩量上涨
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-    vol_expand_ok = COUNT(vol_expand, 20) >= 2
+    shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
+    _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
+    vol_expand_ok = (COUNT(vol_expand, _vep) >= _vem) & (COUNT(vol_expand, _vep) > COUNT(shrink_rise, _vep))
 
     # 筹码密集度（COST近似）
     _chip_period = 60

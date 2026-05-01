@@ -33,6 +33,7 @@ from config import (
     TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS, STOCK_TYPE,
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
+    HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 
@@ -665,6 +666,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # B1
     b1, shrink_score, _ = _compute_v3_b1(C, H, L, O, V)
 
+    # 前期放量上涨过滤 + 排除缩量上涨
+    vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
+    shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
+    _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
+    vol_expand_ok = (COUNT(vol_expand, _vep) >= _vem) & (COUNT(vol_expand, _vep) > COUNT(shrink_rise, _vep))
+
     # 筹码密集度（COST近似）
     _chip_period = 60
     _sum_cv = pd.Series(C * V).rolling(_chip_period, min_periods=1).sum().values
@@ -681,6 +688,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "recent_gc": recent_gc,
         "b1": b1,
         "shrink_score": shrink_score,
+        "vol_expand_ok": vol_expand_ok,
         "chip_dense": chip_dense,
         "chip_spread": _chip_spread,
         "white": white,

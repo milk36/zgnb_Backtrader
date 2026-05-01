@@ -167,8 +167,9 @@ class PortfolioSimulator:
             # 每日卖出检查
             self._check_exits(td)
 
-            # 每日买入检查
-            self._check_entries(td)
+            # 每日买入检查（最后一天只卖不买，避免T+0）
+            if td != self._trading_days[-1]:
+                self._check_entries(td)
 
             # 记录每日权益
             equity = self._calc_equity(td)
