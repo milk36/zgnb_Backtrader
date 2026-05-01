@@ -38,28 +38,27 @@
 |---|------|------|------|
 | 1 | 止损 | 分钟/日线 | 价格 <= 买入价 × (1 - stop_loss_pct/100)，默认跌破4% |
 | 2 | 涨停清仓 | 分钟/日线 | 最高价触及涨停价即全部清仓（主板10%/科创板20%） |
-| 3 | 涨幅2%部分卖出 | 分钟/日线 | 卖出1/4仓位，仅触发一次（`pos.partial_sold` 标记） |
-| 4 | T+N不拉升 | 日线 | 持仓>=N日 且 价格<=买入价，清仓 |
+| 3 | 涨幅2%部分卖出 | 分钟/日线 | 每日最多2次，每次卖1/4仓位直到全部卖出 |
+| 4 | T+N不拉升 | 日线 | 持仓>=N日 且 涨幅<2%，清仓 |
 | 5 | 盈利止盈 | 日线 | 盈利>=X% 且 持仓>=M天，清仓 |
 
 ### 部分卖出（`_partial_sell`）
 
-涨幅达2%时卖出1/4仓位：
+涨幅达2%时卖出1/4仓位，每日最多2次：
 - `sell_size = max(100, pos.size // 4 // 100 * 100)`（100股整手）
 - 高价股 pos.size <= 100 时直接全部卖出
-- 仅触发一次（`pos.partial_sold` 标记）
+- 每日涨幅>=2%时触发，通过 `partial_count_today` 计数器限制每只股票每天最多2次
 - 卖出后 pos.size 减小，后续全仓卖出以剩余股数为准
 
 ### Position 数据类
 
 ```python
 __slots__ = ("code", "buy_date", "buy_price", "buy_low", "stop_loss",
-             "size", "initial_size", "confirmed_minute", "partial_sold")
+             "size", "initial_size", "confirmed_minute")
 ```
 
 - `stop_loss = round(buy_price * (1 - stop_loss_pct / 100), 2)`
 - `confirmed_minute`: 是否通过分钟确认入场
-- `partial_sold`: 是否已执行过部分卖出
 
 ### 分钟级数据（MinuteFeed）
 
@@ -103,9 +102,10 @@ __slots__ = ("code", "buy_date", "buy_price", "buy_low", "stop_loss",
 
 ## 4. Attention
 
-- 已支持部分卖出（涨幅2%卖1/4），不再是纯全仓进出
+- 已支持部分卖出（涨幅2%卖1/4），不再是纯全仓进出；部分卖出每日最多2次直至全部卖出
+- T+1合规：`_check_exits` 开头跳过当日买入的持仓（`pos.buy_date == date`），确保A股T+1规则
+- 模拟结束强制清仓：`run()` 末尾遍历剩余持仓，以最后交易日收盘价清仓，原因标记"模拟结束清仓"
 - 不依赖 Backtrader，纯 numpy/pandas 日频+分钟级模拟
 - `_pending_buys` 队列确保T+1延迟执行，避免未来信息泄露
 - `_sell_position` 开头检查 `pos.size <= 0` 防止除零错误
 - 分钟数据缺失时自动降级为日线逻辑，无需额外配置
-- `market_macd_bullish` 等大盘过滤未实现，可后续扩展

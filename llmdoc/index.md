@@ -13,8 +13,8 @@
 - [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。
 - [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系。运行回测时首先阅读此文档。
 
-- [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛的串行过滤策略，包含综合天命打分、阵营过滤、砖型图强红共振、T+1开盘买入及三级退出逻辑。
-- [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、五级退出（止损→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、MinuteFeed分钟数据支持。
+- [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛→筹码密集过滤的串行过滤策略，包含综合天命打分、阵营过滤、流通市值过滤、砖型图强红共振、60日VWAP筹码密集、T+1开盘买入及三级退出逻辑。
+- [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、T+1合规检查、五级退出（止损→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、模拟结束强制清仓、MinuteFeed分钟数据支持。
 
 ## SOP Documents
 

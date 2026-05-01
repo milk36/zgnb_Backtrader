@@ -246,16 +246,23 @@ class PortfolioSimulator:
                     avg_amt = sig.get("avg_amount_20", np.zeros(idx + 1))[idx]
                     if np.isnan(avg_amt):
                         avg_amt = 0.0
-                    candidates.append((code, score, avg_amt, idx, sig))
+                    chip_sp = sig.get("chip_spread", None)
+                    if chip_sp is not None:
+                        cs = chip_sp[idx]
+                        if np.isnan(cs):
+                            cs = float('inf')
+                    else:
+                        cs = float('inf')
+                    candidates.append((code, score, avg_amt, cs, idx, sig))
             except (IndexError, TypeError):
                 continue
 
         if not candidates:
             return
 
-        # 按 shrink_score 升序（越小=越缩量），avg_amount_20 降序（越大=市值越大优先）
-        candidates.sort(key=lambda x: (x[1], -x[2]))
-        code, score, avg_amt, idx, sig = candidates[0]
+        # 按 shrink_score 升序, avg_amount_20 降序, chip_spread 升序
+        candidates.sort(key=lambda x: (x[1], -x[2], x[3]))
+        code, score, avg_amt, cs, idx, sig = candidates[0]
 
         price = sig["close"][idx]
         if price <= 0:

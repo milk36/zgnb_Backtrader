@@ -6,7 +6,7 @@
 - 五级退出（优先级从高到低）：
   1. 止损：分钟级监控跌破买入价4%
   2. 涨停清仓：分钟级监控涨停价（含累计盈利>10%）
-  3. 涨幅2%：卖出1/4仓位（仅一次）
+  3. 涨幅2%：卖出1/4仓位（每日最多2次）
   4. 2日不拉升（价格<=买入价）清仓
   5. 脱离成本5%以上，持仓最多4-6天
 - 按"下大上小"排名取前N只买入
@@ -25,7 +25,6 @@ class Position:
     __slots__ = (
         "code", "buy_date", "buy_price", "buy_low",
         "stop_loss", "size", "initial_size", "confirmed_minute",
-        "partial_sold",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low, stop_loss, size):
@@ -37,7 +36,6 @@ class Position:
         self.size = size
         self.initial_size = size
         self.confirmed_minute = False
-        self.partial_sold = False
 
 
 class DongnengZhuanSimulator:
@@ -144,6 +142,22 @@ class DongnengZhuanSimulator:
             # 5. 清理分钟线缓存
             if self._minute_feed is not None:
                 self._minute_feed.clear_cache()
+
+        # 模拟结束：强制清仓所有未平仓持仓
+        if self._positions and len(self._trading_days) > 0:
+            last_date = self._trading_days[-1]
+            for code in list(self._positions.keys()):
+                pos = self._positions[code]
+                sig = self._all_signals.get(code)
+                idx = self._find_bar_index(code, last_date)
+                if sig is not None and idx is not None:
+                    try:
+                        price = float(sig["close"][idx])
+                    except (IndexError, TypeError):
+                        price = pos.buy_price
+                else:
+                    price = pos.buy_price
+                self._sell_position(code, pos, price, last_date, "模拟结束清仓")
 
     def _execute_pending_buys(self, date):
         """执行T+1买入，支持5分钟线确认入场"""
@@ -294,6 +308,8 @@ class DongnengZhuanSimulator:
             if pos.buy_date == date:
                 continue
 
+            partial_count_today = 0  # 每只股票每天最多2次部分卖出
+
             sig = self._all_signals.get(code)
             if sig is None:
                 continue
@@ -352,9 +368,10 @@ class DongnengZhuanSimulator:
                             minute_exited = True
                             break
 
-                        # 3. 涨幅2%卖1/4
-                        if not pos.partial_sold and bar_pct >= 2.0:
+                        # 3. 涨幅2%卖1/4（每天最多2次）
+                        if bar_pct >= 2.0 and partial_count_today < 2:
                             self._partial_sell(code, pos, bar_close, date)
+                            partial_count_today += 1
                             if pos.size <= 0:
                                 to_remove.append(code)
                                 minute_exited = True
@@ -380,15 +397,16 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. 涨幅2%卖1/4（日线降级）
-            if not pos.partial_sold and pct_gain >= 2.0:
+            # 3. 涨幅2%卖1/4（每天最多2次）
+            if pct_gain >= 2.0 and partial_count_today < 2:
                 self._partial_sell(code, pos, daily_close, date)
+                partial_count_today += 1
                 if pos.size <= 0:
                     to_remove.append(code)
                     continue
 
-            # 4. T+N不拉升清仓
-            if days_held >= self._t_plus_n and daily_close <= pos.buy_price:
+            # 4. T+N不拉升清仓（涨幅不足2%视为不拉升）
+            if days_held >= self._t_plus_n and pct_gain < 2.0:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, daily_close, date,
                                     f"T+{days_held}未拉升清仓")
@@ -419,7 +437,6 @@ class DongnengZhuanSimulator:
         pnl_amount = proceeds - cost_basis
         self._cash += proceeds
         pos.size -= sell_size
-        pos.partial_sold = True
 
         self._trade_list.append({
             "code": code,

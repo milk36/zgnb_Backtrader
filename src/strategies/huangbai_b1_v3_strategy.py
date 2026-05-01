@@ -665,12 +665,24 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # B1
     b1, shrink_score, _ = _compute_v3_b1(C, H, L, O, V)
 
+    # 筹码密集度（COST近似）
+    _chip_period = 60
+    _sum_cv = pd.Series(C * V).rolling(_chip_period, min_periods=1).sum().values
+    _sum_v = pd.Series(V).rolling(_chip_period, min_periods=1).sum().values
+    _vwap = _sum_cv / np.maximum(_sum_v, 1)
+    _chip_spread = (HHV(C, _chip_period) - LLV(C, _chip_period)) / np.maximum(_vwap, 0.001) * 100
+    _conc_low = _chip_spread == LLV(_chip_spread, _chip_period)
+    _price_near = ABS(C - _vwap) / np.maximum(_vwap, 0.001) <= 0.10
+    chip_dense = _conc_low & _price_near
+
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
         "recent_gc": recent_gc,
         "b1": b1,
         "shrink_score": shrink_score,
+        "chip_dense": chip_dense,
+        "chip_spread": _chip_spread,
         "white": white,
         "yellow": yellow,
         "close": C,
