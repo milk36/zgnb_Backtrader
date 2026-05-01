@@ -39,6 +39,8 @@ HUANGBAI_N1 = 3       # SHORT 周期
 HUANGBAI_N2 = 21      # LONG 周期
 HUANGBAI_T_PLUS_N = 3 # T+N 天
 HUANGBAI_GC_LOOKBACK = 40  # 金叉回溯天数
+HUANGBAI_VOL_EXPAND_PERIOD = 20   # 前期放量上涨回看天数
+HUANGBAI_VOL_EXPAND_MIN = 2      # 回看期内最少放量上涨天数
 STOCK_TYPE = "main"   # "main" 或 "tech"
 SCAN_MAX_WORKERS = 10  # 全市场扫描线程数，None=自动(CPU核心数)，1=单线程
 
@@ -54,7 +56,7 @@ DNZH_PER_POSITION = 50_000           # 每只5万
 DNZH_T_PLUS_N = 2                    # 2日不拉升清仓
 DNZH_MAX_HOLD_DAYS = 5               # 脱离成本5%以上持仓最多5天
 DNZH_PROFIT_PCT = 5.0                # 脱离成本区百分比
-DNZH_STOP_LOSS_PCT = 4.0             # 止损百分比（买入价下跌4%）
+DNZH_STOP_LOSS_PCT = 2.0             # 止损百分比（买入价下跌2%）
 
 # 动能砖选股过滤参数
 DNZH_MIN_MARKET_CAP = 50.0            # 流通市值最低阈值（亿元，0=不过滤）

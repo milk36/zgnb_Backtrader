@@ -147,3 +147,4 @@ B1逻辑变更时，V1/V2需同步三处（`indicators()`、`_compute_signals()`
 - `_compute_signals()` 和 `indicators()` 是同一逻辑的两种实现，修改一处必须同步另一处
 - V2/V3的 `scan_all()` 和 `preload_all_signals()` 返回三元组（含 `market_macd_bullish`），V1返回二元组
 - 周线计算使用 `resample('W-FRI')` 以周五为周结束日
+- 所有策略最后一个交易日只卖不买,因为A股不支持T+0,避免组合模拟器中最后一天无交易记录

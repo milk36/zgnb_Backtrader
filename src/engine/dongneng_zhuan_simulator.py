@@ -4,10 +4,10 @@
 - 总资金10万，单只最多5万，最多持仓2只
 - 信号日T检测 → T+1分钟线确认买入（无分钟线时降级为开盘价）
 - 五级退出（优先级从高到低）：
-  1. 止损：分钟级监控跌破买入价4%
-  2. 涨停清仓：分钟级监控涨停价（含累计盈利>10%）
-  3. 涨幅2%：卖出1/4仓位（每日最多2次）
-  4. 2日不拉升（价格<=买入价）清仓
+  1. 止损：分钟级监控跌破买入价2%
+  2. 涨停清仓 / 累计盈利≥10%：全部清仓
+  3. 涨幅2%：卖出1/4仓位（每日最多2次，涨停则清仓）
+  4. 2日不拉升（涨幅<2%）清仓
   5. 脱离成本5%以上，持仓最多4-6天
 - 按"下大上小"排名取前N只买入
 """
@@ -125,15 +125,18 @@ class DongnengZhuanSimulator:
             self._log(f"  [动能砖] 入场={mode_entry}  出场={mode_exit}  "
                       f"确认bar数={self._confirm_bars}")
 
+        last_td = self._trading_days[-1] if self._trading_days else None
         for td in self._trading_days:
-            # 1. 执行T+1待买入（用今日开盘价）
-            self._execute_pending_buys(td)
+            # 1. 执行T+1待买入（最后一天不执行，避免买入后强制清仓产生T+0）
+            if td != last_td:
+                self._execute_pending_buys(td)
 
             # 2. 卖出检查
             self._check_exits(td)
 
-            # 3. 扫描信号 → 加入明日待买入队列
-            self._scan_signals(td)
+            # 3. 扫描信号 → 加入明日待买入队列（最后一天跳过，无次日可执行）
+            if td != last_td:
+                self._scan_signals(td)
 
             # 4. 记录权益
             equity = self._calc_equity(td)
@@ -359,11 +362,12 @@ class DongnengZhuanSimulator:
                             minute_exited = True
                             break
 
-                        # 2. 涨停清仓
-                        if limit_up_price > 0 and bar_high >= limit_up_price:
+                        # 2. 涨停清仓 / 累计盈利≥10%清仓
+                        if (limit_up_price > 0 and bar_high >= limit_up_price) or bar_pct >= 10.0:
+                            reason = "涨停清仓" if (limit_up_price > 0 and bar_high >= limit_up_price) else f"盈利{bar_pct:.1f}%清仓"
                             self._cooldown[code] = cur_idx
                             self._sell_position(code, pos, bar_close, date,
-                                                f"涨停清仓(分钟,盈利{bar_pct:.1f}%)")
+                                                f"{reason}(分钟)")
                             to_remove.append(code)
                             minute_exited = True
                             break
@@ -389,11 +393,11 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 2. 涨停清仓（日线降级）
-            if limit_up_price > 0 and daily_high >= limit_up_price:
+            # 2. 涨停清仓 / 累计盈利≥10%清仓（日线降级）
+            if (limit_up_price > 0 and daily_high >= limit_up_price) or pct_gain >= 10.0:
+                reason = "涨停清仓" if (limit_up_price > 0 and daily_high >= limit_up_price) else f"盈利{pct_gain:.1f}%清仓"
                 self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, daily_close, date,
-                                    f"涨停清仓(盈利{pct_gain:.1f}%)")
+                self._sell_position(code, pos, daily_close, date, reason)
                 to_remove.append(code)
                 continue
 
@@ -426,10 +430,11 @@ class DongnengZhuanSimulator:
                 del self._positions[code]
 
     def _partial_sell(self, code, pos, price, date):
-        """卖出1/4仓位"""
+        """卖出1/4仓位（剩余不足时清仓）"""
         sell_size = max(100, pos.size // 4 // 100 * 100)
         if sell_size >= pos.size:
             sell_size = pos.size
+        is_clearance = (sell_size == pos.size)
 
         proceeds = sell_size * price * (1 - self._commission)
         cost_basis = sell_size * pos.buy_price * (1 + self._commission)
@@ -438,6 +443,7 @@ class DongnengZhuanSimulator:
         self._cash += proceeds
         pos.size -= sell_size
 
+        action = "清仓" if is_clearance else "卖1/4"
         self._trade_list.append({
             "code": code,
             "buy_date": pos.buy_date,
@@ -447,10 +453,10 @@ class DongnengZhuanSimulator:
             "size": sell_size,
             "pnl_pct": pnl,
             "pnl_amount": pnl_amount,
-            "reason": f"涨2%卖1/4",
-            "partial": True,
+            "reason": f"涨2%{action}",
+            "partial": not is_clearance,
         })
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] 卖1/4 {code}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] {action} {code}  "
                   f"价格={price:.2f}  数量={sell_size}  "
                   f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  "
                   f"剩余={pos.size}  "
@@ -574,13 +580,43 @@ class DongnengZhuanSimulator:
 
         trades = report["trade_list"]
         if trades:
-            _out(f"\n  --- 交易明细 (共 {len(trades)} 笔) ---")
+            # 按股票汇总：买入价=首次买入价，卖出价=最后卖出价，总收益=各笔之和
+            from collections import OrderedDict
+            stock_summary = OrderedDict()
             for t in trades:
-                bd = t["buy_date"].strftime("%Y-%m-%d") if hasattr(t["buy_date"], "strftime") else str(t["buy_date"])
-                sd = t["sell_date"].strftime("%Y-%m-%d") if hasattr(t["sell_date"], "strftime") else str(t["sell_date"])
-                _out(f"  {t['code']}  {bd}→{sd}  "
-                     f"{t['buy_price']:.2f}→{t['sell_price']:.2f}  "
-                     f"{t['pnl_pct']:+.2f}%  {t['reason']}")
+                c = t["code"]
+                if c not in stock_summary:
+                    stock_summary[c] = {
+                        "code": c,
+                        "buy_date": t["buy_date"],
+                        "sell_date": t["sell_date"],
+                        "buy_price": t["buy_price"],
+                        "sell_price": t["sell_price"],
+                        "total_pnl_amount": 0.0,
+                        "total_size": 0,
+                        "reasons": [],
+                    }
+                s = stock_summary[c]
+                s["sell_date"] = t["sell_date"]
+                s["sell_price"] = t["sell_price"]
+                s["total_pnl_amount"] += t["pnl_amount"]
+                s["total_size"] += t["size"]
+                if t["reason"] not in s["reasons"]:
+                    s["reasons"].append(t["reason"])
+
+            # 按盈利金额从高到低排序
+            sorted_stocks = sorted(stock_summary.values(),
+                                   key=lambda x: x["total_pnl_amount"], reverse=True)
+            _out(f"\n  --- 交易明细 (共 {len(sorted_stocks)} 只股票) ---")
+            for s in sorted_stocks:
+                total_cost = s["total_size"] * s["buy_price"] * (1 + 0.0003)
+                total_pct = (s["total_pnl_amount"] / total_cost * 100) if total_cost > 0 else 0
+                bd = s["buy_date"].strftime("%Y-%m-%d") if hasattr(s["buy_date"], "strftime") else str(s["buy_date"])
+                sd = s["sell_date"].strftime("%Y-%m-%d") if hasattr(s["sell_date"], "strftime") else str(s["sell_date"])
+                _out(f"  {s['code']}  {bd}→{sd}  "
+                     f"{s['buy_price']:.2f}→{s['sell_price']:.2f}  "
+                     f"{total_pct:+.2f}%({s['total_pnl_amount']:+,.0f})  "
+                     f"{'+'.join(s['reasons'])}")
 
         _out(f"{'=' * 55}")
 
