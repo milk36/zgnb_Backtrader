@@ -999,7 +999,14 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _limit_shrink = _limit_up & (V < REF(V, 1))
     _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
     no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
-    vol_expand_ok = has_vol_expand & no_shrinkage_surge & no_consec_limit_shrink
+    # 连续上涨后放量下跌排除
+    _rise_v = np.where(C > REF(C, 1), V, 0)
+    _decline_v = np.where(C < REF(C, 1), V, 0)
+    _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
+    _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
+    no_heavy_decline = ~(_dvs > _rvs)
+    vol_expand_ok = (has_vol_expand & no_shrinkage_surge
+                     & no_consec_limit_shrink & no_heavy_decline)
 
     # 筹码密集度（COST近似）
     _chip_period = 60
