@@ -411,9 +411,9 @@ class PortfolioSimulator:
                             cur_idx = self._td_index.get(date)
                             if cur_idx is not None:
                                 self._cooldown[code] = cur_idx
-                        self._sell_position(code, pos, price, date, "半仓跌破白线")
-                        to_remove.append(code)
-                        sold = True
+                            self._sell_position(code, pos, price, date, "半仓跌破白线")
+                            to_remove.append(code)
+                            sold = True
                 if sold:
                     continue
                 # 未清仓：仍允许涨停卖1/2和中阳卖1/3

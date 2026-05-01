@@ -335,7 +335,7 @@ class DongnengZhuanSimulator:
 
                         # 1. 止损
                         if bar_low <= pos.stop_loss:
-                            sell_price = min(bar_close, pos.stop_loss)
+                            sell_price = pos.stop_loss
                             self._cooldown[code] = cur_idx
                             self._sell_position(code, pos, sell_price, date,
                                                 "止损(分钟)")

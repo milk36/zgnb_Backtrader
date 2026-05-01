@@ -497,7 +497,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     final_ok = dongneng_ok & jinzhuan_ok & chip_dense
 
     # 排名分数：金砖排名"下大上小"
-    rank_score = np.where(final_ok, brick / pct_chg, 0.0)
+    rank_score = np.where(final_ok, brick / np.maximum(pct_chg, 0.01), 0.0)
 
     return {
         "dongneng_ok": dongneng_ok,
