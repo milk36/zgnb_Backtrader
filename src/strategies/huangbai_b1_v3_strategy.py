@@ -34,6 +34,7 @@ from config import (
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
     HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
+    HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 
@@ -666,11 +667,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # B1
     b1, shrink_score, _ = _compute_v3_b1(C, H, L, O, V)
 
-    # 前期放量上涨过滤 + 排除缩量上涨
+    # 前期放量上涨过滤 + 排除缩量快速拉升
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-    shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
-    vol_expand_ok = (COUNT(vol_expand, _vep) >= _vem) & (COUNT(vol_expand, _vep) > COUNT(shrink_rise, _vep))
+    has_vol_expand = COUNT(vol_expand, _vep) >= _vem
+    _ref_c = REF(C, _vep)
+    _price_rise = np.where(np.abs(_ref_c) > 0.001,
+                           (C - _ref_c) / np.abs(_ref_c) * 100, 0)
+    _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
+    no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
+                           & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
+    vol_expand_ok = has_vol_expand & no_shrinkage_surge
 
     # 筹码密集度（COST近似）
     _chip_period = 60

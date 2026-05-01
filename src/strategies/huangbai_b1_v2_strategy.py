@@ -36,6 +36,7 @@ from config import (
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
     HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
     HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
+    HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 
@@ -358,13 +359,18 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         # 个股MACD多头过滤（暂未启用，预留接口）
         self._stock_macd_bullish = np.ones(len(C), dtype=bool)
 
-        # 前期放量上涨过滤：近期涨势必须有放量支撑，排除缩量上涨
+        # 前期放量上涨过滤：必须有放量支撑，排除缩量快速拉升
         vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-        # 缩量上涨：收盘价上涨但成交量低于前一日
-        shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
-        # 放量上涨天数必须 > 缩量上涨天数，且至少N天放量
         _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
-        self._vol_expand_ok = (COUNT(vol_expand, _vep) >= _vem) & (COUNT(vol_expand, _vep) > COUNT(shrink_rise, _vep))
+        has_vol_expand = COUNT(vol_expand, _vep) >= _vem
+        # 缩量快速拉升：近期涨幅大但量能萎缩
+        _ref_c = REF(C, _vep)
+        _price_rise = np.where(np.abs(_ref_c) > 0.001,
+                               (C - _ref_c) / np.abs(_ref_c) * 100, 0)
+        _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
+        no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
+                               & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
+        self._vol_expand_ok = has_vol_expand & no_shrinkage_surge
 
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
@@ -619,13 +625,16 @@ def _compute_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_ok = True
 
-    # 前期放量上涨过滤 + 排除缩量上涨
+    # 前期放量上涨过滤 + 排除缩量快速拉升
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-    shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
-    vol_expand_cnt = COUNT(vol_expand, _vep)[i]
-    shrink_rise_cnt = COUNT(shrink_rise, _vep)[i]
-    vol_expand_ok = (vol_expand_cnt >= _vem) and (vol_expand_cnt > shrink_rise_cnt)
+    has_vol_expand = COUNT(vol_expand, _vep)[i] >= _vem
+    _ref_c = REF(C, _vep)[i]
+    _price_rise = (C[i] - _ref_c) / abs(_ref_c) * 100 if abs(_ref_c) > 0.001 else 0
+    _vol_ratio = MA(V, _vep)[i] / max(MA(V, 60)[i], 1)
+    no_shrinkage_surge = not (_price_rise > HUANGBAI_SURGE_PRICE_PCT
+                              and _vol_ratio < HUANGBAI_SURGE_VOL_RATIO)
+    vol_expand_ok = has_vol_expand and no_shrinkage_surge
 
     if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
@@ -1068,11 +1077,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_bullish = np.ones(len(C), dtype=bool)
 
-    # 前期放量上涨过滤 + 排除缩量上涨
+    # 前期放量上涨过滤 + 排除缩量快速拉升
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
-    shrink_rise = (C > REF(C, 1)) & (V < REF(V, 1))
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
-    vol_expand_ok = (COUNT(vol_expand, _vep) >= _vem) & (COUNT(vol_expand, _vep) > COUNT(shrink_rise, _vep))
+    has_vol_expand = COUNT(vol_expand, _vep) >= _vem
+    _ref_c = REF(C, _vep)
+    _price_rise = np.where(np.abs(_ref_c) > 0.001,
+                           (C - _ref_c) / np.abs(_ref_c) * 100, 0)
+    _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
+    no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
+                           & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
+    vol_expand_ok = has_vol_expand & no_shrinkage_surge
 
     # 筹码密集度（COST近似）
     _chip_period = 60

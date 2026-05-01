@@ -125,7 +125,7 @@ class DongnengZhuanSimulator:
             self._log(f"  [动能砖] 入场={mode_entry}  出场={mode_exit}  "
                       f"确认bar数={self._confirm_bars}")
 
-        last_td = self._trading_days[-1] if self._trading_days else None
+        last_td = self._trading_days[-1] if len(self._trading_days) > 0 else None
         for td in self._trading_days:
             # 1. 执行T+1待买入（最后一天不执行，避免买入后强制清仓产生T+0）
             if td != last_td:
@@ -530,8 +530,14 @@ class DongnengZhuanSimulator:
             sharpe = None
 
         total_trades = len(self._trade_list)
-        won = sum(1 for t in self._trade_list if t["pnl_pct"] > 0)
-        lost = sum(1 for t in self._trade_list if t["pnl_pct"] <= 0)
+
+        # 按股票汇总计算胜率
+        stock_pnl = {}
+        for t in self._trade_list:
+            c = t["code"]
+            stock_pnl[c] = stock_pnl.get(c, 0.0) + t["pnl_amount"]
+        won = sum(1 for v in stock_pnl.values() if v > 0)
+        lost = sum(1 for v in stock_pnl.values() if v <= 0)
 
         return {
             "initial_cash": initial,
@@ -570,9 +576,9 @@ class DongnengZhuanSimulator:
         else:
             _out(f"  夏普比率:        N/A")
 
-        _out(f"  总交易次数:  {report['total_trades']:>12}")
-        _out(f"  盈利次数:    {report['won']:>12}")
-        _out(f"  亏损次数:    {report['lost']:>12}")
+        _out(f"  总交易笔数:  {report['total_trades']:>12}")
+        _out(f"  盈利股票:    {report['won']:>12}")
+        _out(f"  亏损股票:    {report['lost']:>12}")
         won = report["won"]
         total = won + report["lost"]
         if total > 0:

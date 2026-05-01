@@ -16,6 +16,18 @@
    - 黄线 = `(MA14 + MA28 + MA57 + MA114) / 4`（BBI式均线）
 3. **B1信号**：以下7个子条件任一满足（OR）
 
+### 前期放量过滤 + 缩量拉升排除
+
+在 B1 信号触发后，还需通过 `vol_expand_ok` 过滤，排除涨势缺乏量能支撑的股票：
+
+1. **放量支撑**：近 `HUANGBAI_VOL_EXPAND_PERIOD`（默认20）天内，至少 `HUANGBAI_VOL_EXPAND_MIN`（默认2）天满足放量上涨（V > 1.8×前日量 & C > O & C > 前收）
+2. **缩量快速拉升排除**：检测近期是否存在"价涨量缩"的异常模式
+   - 近N天涨幅 = `(C - REF(C, N)) / REF(C, N) * 100`
+   - 量比 = `MA(V, N) / MA(V, 60)`（近期均量 vs 长期均量）
+   - 若 涨幅 > `HUANGBAI_SURGE_PRICE_PCT`（默认15%）且 量比 < `HUANGBAI_SURGE_VOL_RATIO`（默认0.7），视为缩量快速拉升，排除
+
+此过滤仅在 `_compute_all_bar_signals()` 和 `_compute_signals()` 中实现（扫描和组合模拟路径），Backtrader 策略类中未实现。
+
 ### B1 七个子条件
 
 | # | 名称 | 核心逻辑 |
@@ -81,14 +93,14 @@
 
 | 函数/类 | 说明 |
 |---------|------|
-| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score/open/volume/avg_amount_20 等），基于 `indicators()` 的逻辑 |
+| `_compute_all_bar_signals(C, H, L, O, V, dates, params)` | 对单只股票计算每根 bar 的信号数组（向量版，返回 weekly_bull/gc_ok/b1/shrink_score/vol_expand_ok/avg_amount_20/chip_spread 等），基于 `indicators()` 的逻辑 |
 | `_scan_one_all_bars(code, params)` | 并行加载单只股票数据并调用 `_compute_all_bar_signals()` |
 | `preload_all_signals(start, end, stock_type, max_workers)` | 用 ProcessPoolExecutor 并行预计算全部 A 股的每 bar 信号，返回 `(all_signals, trading_days)` |
 | `PortfolioSimulator`（`src/engine/portfolio_simulator.py`） | 组合级日频模拟引擎：100万资金、最多10只、每只10万，周更观察池+日检查买卖 |
 
 组合模拟流程：
 1. Phase 1: `preload_all_signals()` 并行预计算全部 A 股信号（~55秒，16 workers）
-2. Phase 2: `PortfolioSimulator.run()` 逐日模拟（周一更新观察池 → 每日检查金叉+B1 → 按(shrink_score升序, avg_amount_20降序)双键排序买入最优 → 检查卖出条件）
+2. Phase 2: `PortfolioSimulator.run()` 逐日模拟（周一更新观察池 → 每日检查金叉+B1+vol_expand_ok → 按(shrink_score升序, avg_amount_20降序, chip_spread升序)三键排序买入最优 → 检查卖出条件）
 
 卖出优先级：止损 → T+N没涨 → 盈利100%清仓 → 半仓持股模式 → 涨停卖1/2（中阳未触发时）→ 中阳卖1/3
 
