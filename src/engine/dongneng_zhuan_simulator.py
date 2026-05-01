@@ -545,7 +545,7 @@ class DongnengZhuanSimulator:
             "total_return": total_return,
             "max_drawdown": max_drawdown,
             "sharpe": sharpe,
-            "total_trades": total_trades,
+            "total_trades": len(stock_pnl),
             "won": won,
             "lost": lost,
             "trade_list": self._trade_list,
@@ -576,7 +576,7 @@ class DongnengZhuanSimulator:
         else:
             _out(f"  夏普比率:        N/A")
 
-        _out(f"  总交易笔数:  {report['total_trades']:>12}")
+        _out(f"  交易股票数:  {report['total_trades']:>12}")
         _out(f"  盈利股票:    {report['won']:>12}")
         _out(f"  亏损股票:    {report['lost']:>12}")
         won = report["won"]
