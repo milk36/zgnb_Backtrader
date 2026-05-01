@@ -69,6 +69,7 @@ MACD 参数由 `config.py` 配置：`MARKET_MACD_FAST=12`, `MARKET_MACD_SLOW=26`
 - B1 逻辑变更需同步三个位置：`HuangBaiB1V2Strategy.indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`
 - 前期放量过滤在三个位置均已实现：Backtrader 策略类 `_vol_expand_ok`、`_compute_signals()`、`_compute_all_bar_signals()`
 - 缩量快速拉升检测逻辑：涨幅 > `HUANGBAI_SURGE_PRICE_PCT`(15%) 且 近期均量/长期均量 < `HUANGBAI_SURGE_VOL_RATIO`(0.7) 时排除
+- 连续涨停缩量排除：前期连续2天涨停且成交量递减则直接剔除（主板10%/科创板20%涨停阈值）
 - 单股回测时 V2 自动加载大盘指数作为第二数据源（`data1`），加载失败则跳过大盘过滤并打印警告
 - `scan_all()` 返回元组 `(results, market_macd_ok)`，与 V1 的 `results` 不同，调用方需注意解包
 - `preload_all_signals()` 返回三元组，V1 返回二元组

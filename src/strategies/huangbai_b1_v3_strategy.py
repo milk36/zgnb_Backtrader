@@ -667,7 +667,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # B1
     b1, shrink_score, _ = _compute_v3_b1(C, H, L, O, V)
 
-    # 前期放量上涨过滤 + 排除缩量快速拉升
+    # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
     has_vol_expand = COUNT(vol_expand, _vep) >= _vem
@@ -677,7 +677,13 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
     no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
                            & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
-    vol_expand_ok = has_vol_expand & no_shrinkage_surge
+    # 连续涨停缩量排除
+    _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
+    _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
+    _limit_shrink = _limit_up & (V < REF(V, 1))
+    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
+    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+    vol_expand_ok = has_vol_expand & no_shrinkage_surge & no_consec_limit_shrink
 
     # 筹码密集度（COST近似）
     _chip_period = 60

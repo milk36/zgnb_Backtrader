@@ -370,7 +370,13 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
         no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
                                & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
-        self._vol_expand_ok = has_vol_expand & no_shrinkage_surge
+        # 连续涨停缩量排除：前期有连续涨停且缩量则直接剔除
+        _lp = 1.20 if self.p.stock_type == "tech" else 1.10
+        _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
+        _limit_shrink = _limit_up & (V < REF(V, 1))
+        _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
+        no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+        self._vol_expand_ok = has_vol_expand & no_shrinkage_surge & no_consec_limit_shrink
 
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
@@ -625,7 +631,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_ok = True
 
-    # 前期放量上涨过滤 + 排除缩量快速拉升
+    # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
     has_vol_expand = COUNT(vol_expand, _vep)[i] >= _vem
@@ -634,7 +640,13 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _vol_ratio = MA(V, _vep)[i] / max(MA(V, 60)[i], 1)
     no_shrinkage_surge = not (_price_rise > HUANGBAI_SURGE_PRICE_PCT
                               and _vol_ratio < HUANGBAI_SURGE_VOL_RATIO)
-    vol_expand_ok = has_vol_expand and no_shrinkage_surge
+    # 连续涨停缩量排除
+    _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
+    _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
+    _limit_shrink = _limit_up & (V < REF(V, 1))
+    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
+    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep)[i] < 1
+    vol_expand_ok = has_vol_expand and no_shrinkage_surge and no_consec_limit_shrink
 
     if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
@@ -1077,7 +1089,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_bullish = np.ones(len(C), dtype=bool)
 
-    # 前期放量上涨过滤 + 排除缩量快速拉升
+    # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
     has_vol_expand = COUNT(vol_expand, _vep) >= _vem
@@ -1087,7 +1099,13 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
     no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
                            & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
-    vol_expand_ok = has_vol_expand & no_shrinkage_surge
+    # 连续涨停缩量排除
+    _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
+    _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
+    _limit_shrink = _limit_up & (V < REF(V, 1))
+    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
+    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+    vol_expand_ok = has_vol_expand & no_shrinkage_surge & no_consec_limit_shrink
 
     # 筹码密集度（COST近似）
     _chip_period = 60

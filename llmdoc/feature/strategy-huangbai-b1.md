@@ -25,6 +25,10 @@
    - 近N天涨幅 = `(C - REF(C, N)) / REF(C, N) * 100`
    - 量比 = `MA(V, N) / MA(V, 60)`（近期均量 vs 长期均量）
    - 若 涨幅 > `HUANGBAI_SURGE_PRICE_PCT`（默认15%）且 量比 < `HUANGBAI_SURGE_VOL_RATIO`（默认0.7），视为缩量快速拉升，排除
+3. **连续涨停缩量排除**：前期出现连续涨停且成交量递减 → 直接剔除
+   - 涨停判断：`C >= round(REF(C,1) * 涨停比例, 2)`（主板10%/科创板20%）
+   - 缩量判断：`V < REF(V, 1)`
+   - 连续2天同时满足涨停+缩量 → 排除
 
 此过滤仅在 `_compute_all_bar_signals()` 和 `_compute_signals()` 中实现（扫描和组合模拟路径），Backtrader 策略类中未实现。
 

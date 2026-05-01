@@ -566,8 +566,14 @@ class PortfolioSimulator:
         # 交易统计（仅统计清仓交易）
         closed_trades = [t for t in self._trade_list if not t.get("partial")]
         total_trades = len(closed_trades)
-        won = sum(1 for t in closed_trades if t["pnl_pct"] > 0)
-        lost = sum(1 for t in closed_trades if t["pnl_pct"] <= 0)
+
+        # 按股票汇总计算胜率
+        stock_pnl = {}
+        for t in closed_trades:
+            c = t["code"]
+            stock_pnl[c] = stock_pnl.get(c, 0.0) + t["pnl_amount"]
+        won = sum(1 for v in stock_pnl.values() if v > 0)
+        lost = sum(1 for v in stock_pnl.values() if v <= 0)
 
         return {
             "initial_cash": initial,
@@ -575,11 +581,12 @@ class PortfolioSimulator:
             "total_return": total_return,
             "max_drawdown": max_drawdown,
             "sharpe": sharpe,
-            "total_trades": total_trades,
+            "total_trades": len(stock_pnl),
             "won": won,
             "lost": lost,
             "trade_list": self._trade_list,
             "trading_days": len(self._trading_days),
+            "_commission": self._commission,
         }
 
     @staticmethod
@@ -606,24 +613,53 @@ class PortfolioSimulator:
         else:
             _out(f"  夏普比率:        N/A")
 
-        _out(f"  总交易次数:  {report['total_trades']:>12}")
-        _out(f"  盈利次数:    {report['won']:>12}")
-        _out(f"  亏损次数:    {report['lost']:>12}")
+        _out(f"  交易股票数:  {report['total_trades']:>12}")
+        _out(f"  盈利股票:    {report['won']:>12}")
+        _out(f"  亏损股票:    {report['lost']:>12}")
         won = report["won"]
         total = won + report["lost"]
         if total > 0:
             _out(f"  胜率:        {won / total * 100:>11.2f}%")
 
-        # 交易明细（仅清仓交易）
-        trades = [t for t in report["trade_list"] if not t.get("partial")]
-        if trades:
-            _out(f"\n  --- 交易明细 (共 {len(trades)} 笔) ---")
-            for t in trades:
-                bd = t["buy_date"].strftime("%Y-%m-%d") if hasattr(t["buy_date"], "strftime") else str(t["buy_date"])
-                sd = t["sell_date"].strftime("%Y-%m-%d") if hasattr(t["sell_date"], "strftime") else str(t["sell_date"])
-                _out(f"  {t['code']}  {bd}→{sd}  "
-                     f"{t['buy_price']:.2f}→{t['sell_price']:.2f}  "
-                     f"{t['pnl_pct']:+.2f}%  {t['reason']}")
+        # 交易明细：按股票汇总，按盈利金额从高到低排序
+        all_trades = report["trade_list"]
+        if all_trades:
+            from collections import OrderedDict
+            stock_summary = OrderedDict()
+            for t in all_trades:
+                c = t["code"]
+                if c not in stock_summary:
+                    stock_summary[c] = {
+                        "code": c,
+                        "buy_date": t["buy_date"],
+                        "sell_date": t["sell_date"],
+                        "buy_price": t["buy_price"],
+                        "sell_price": t["sell_price"],
+                        "total_pnl_amount": 0.0,
+                        "total_size": 0,
+                        "total_cost": 0.0,
+                        "reasons": [],
+                    }
+                s = stock_summary[c]
+                s["sell_date"] = t["sell_date"]
+                s["sell_price"] = t["sell_price"]
+                s["total_pnl_amount"] += t["pnl_amount"]
+                s["total_size"] += t["size"]
+                s["total_cost"] += t["size"] * t["buy_price"] * (1 + report.get("_commission", 0.0003))
+                if t["reason"] not in s["reasons"]:
+                    s["reasons"].append(t["reason"])
+
+            sorted_stocks = sorted(stock_summary.values(),
+                                   key=lambda x: x["total_pnl_amount"], reverse=True)
+            _out(f"\n  --- 交易明细 (共 {len(sorted_stocks)} 只股票) ---")
+            for s in sorted_stocks:
+                total_pct = (s["total_pnl_amount"] / s["total_cost"] * 100) if s["total_cost"] > 0 else 0
+                bd = s["buy_date"].strftime("%Y-%m-%d") if hasattr(s["buy_date"], "strftime") else str(s["buy_date"])
+                sd = s["sell_date"].strftime("%Y-%m-%d") if hasattr(s["sell_date"], "strftime") else str(s["sell_date"])
+                _out(f"  {s['code']}  {bd}→{sd}  "
+                     f"{s['buy_price']:.2f}→{s['sell_price']:.2f}  "
+                     f"{total_pct:+.2f}%({s['total_pnl_amount']:+,.0f})  "
+                     f"{'+'.join(s['reasons'])}")
 
         _out(f"{'=' * 55}")
 
