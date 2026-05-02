@@ -196,6 +196,19 @@ class DongnengZhuanSimulator:
             if daily_open <= 0:
                 continue
 
+            # 涨停板不买入：开盘价>=昨日收盘×涨停比例则放弃
+            if idx >= 1:
+                prev_close = sig["close"][idx - 1]
+                if prev_close > 0:
+                    _is_tech = code[:2] in ("30", "68")
+                    _limit_pct = 1.20 if _is_tech else 1.10
+                    _limit_up = round(prev_close * _limit_pct, 2)
+                    if daily_open >= _limit_up:
+                        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] "
+                                  f"放弃 {code}  涨停板不买入  "
+                                  f"开盘={daily_open:.2f}>=涨停={_limit_up:.2f}")
+                        continue
+
             buy_price = None
             buy_reason = ""
             confirmed = False
