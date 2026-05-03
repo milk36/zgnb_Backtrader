@@ -43,6 +43,7 @@ HUANGBAI_VOL_EXPAND_PERIOD = 20   # 前期放量上涨回看天数
 HUANGBAI_VOL_EXPAND_MIN = 2      # 回看期内最少放量上涨天数
 HUANGBAI_SURGE_PRICE_PCT = 15    # 缩量快速拉升检测：涨幅阈值(%)
 HUANGBAI_SURGE_VOL_RATIO = 0.7   # 缩量快速拉升检测：量比阈值(近期均量/长期均量)
+HUANGBAI_S1_PERIOD = 20          # S1/大风车检测回溯天数
 STOCK_TYPE = "main"   # "main" 或 "tech"
 SCAN_MAX_WORKERS = 10  # 全市场扫描线程数，None=自动(CPU核心数)，1=单线程
 

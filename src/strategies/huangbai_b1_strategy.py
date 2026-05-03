@@ -34,6 +34,7 @@ from config import (
     HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
     HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
     HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
+    HUANGBAI_S1_PERIOD,
 )
 
 
@@ -307,6 +308,45 @@ class HuangBaiB1Strategy(BaseStrategy):
         # ---- 总 B1 信号 ----
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
+
+        # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
+        vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
+        _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
+        has_vol_expand = COUNT(vol_expand, _vep) >= _vem
+        _ref_c = REF(C, _vep)
+        _price_rise = np.where(np.abs(_ref_c) > 0.001,
+                               (C - _ref_c) / np.abs(_ref_c) * 100, 0)
+        _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
+        no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
+                               & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
+        # 连续涨停缩量排除
+        _lp = 1.20 if self.p.stock_type == "tech" else 1.10
+        _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
+        _limit_shrink = _limit_up & (V < REF(V, 1))
+        _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
+        no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+        # 连续上涨后放量下跌排除
+        _rise_v = np.where(C > REF(C, 1), V, 0)
+        _decline_v = np.where(C < REF(C, 1), V, 0)
+        _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
+        _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
+        no_heavy_decline = ~(_dvs > _rvs)
+        # S1/大风车排除：加速上涨后出现放天量大阴线或历史天量长上下影阴线
+        _s1p = HUANGBAI_S1_PERIOD
+        _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+        _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+        _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
+        _s1 = _accel & _big_vol & _big_yin
+        _upper_shadow = H - np.maximum(O, C)
+        _lower_shadow = np.minimum(O, C) - L
+        _body = ABS(C - O)
+        _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
+        _hist_vol = V == HHV(V, 120)
+        _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
+        no_s1_dafengche = ~EXIST(_s1 | _dafengche, _s1p)
+        self._vol_expand_ok = (has_vol_expand & no_shrinkage_surge
+                               & no_consec_limit_shrink & no_heavy_decline
+                               & no_s1_dafengche)
 
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑                                              #
@@ -668,6 +708,48 @@ def _compute_signals(C, H, L, O, V, dates, params):
                    and near_amp[i] >= 11.9 and far_amp[i] >= 19.5):
         b1 = True
 
+    # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
+    vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
+    _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
+    has_vol_expand = COUNT(vol_expand, _vep)[i] >= _vem
+    _ref_c = REF(C, _vep)[i]
+    _price_rise = (C[i] - _ref_c) / abs(_ref_c) * 100 if abs(_ref_c) > 0.001 else 0
+    _vol_ratio = MA(V, _vep)[i] / max(MA(V, 60)[i], 1)
+    no_shrinkage_surge = not (_price_rise > HUANGBAI_SURGE_PRICE_PCT
+                              and _vol_ratio < HUANGBAI_SURGE_VOL_RATIO)
+    # 连续涨停缩量排除
+    _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
+    _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
+    _limit_shrink = _limit_up & (V < REF(V, 1))
+    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
+    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep)[i] < 1
+    # 连续上涨后放量下跌排除
+    _rise_v = np.where(C > REF(C, 1), V, 0)
+    _decline_v = np.where(C < REF(C, 1), V, 0)
+    _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values[i]
+    _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values[i]
+    no_heavy_decline = not (_dvs > _rvs)
+    # S1/大风车排除
+    _s1p = HUANGBAI_S1_PERIOD
+    _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+    _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
+    _s1 = _accel & _big_vol & _big_yin
+    _upper_shadow = H - np.maximum(O, C)
+    _lower_shadow = np.minimum(O, C) - L
+    _body = ABS(C - O)
+    _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
+    _hist_vol = V == HHV(V, 120)
+    _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
+    no_s1_dafengche = not EXIST(_s1 | _dafengche, _s1p)[i]
+    vol_expand_ok = (has_vol_expand and no_shrinkage_surge
+                     and no_consec_limit_shrink and no_heavy_decline
+                     and no_s1_dafengche)
+
+    if not vol_expand_ok:
+        return {"weekly": True, "gc": True, "b1": False,
+                "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
+
     return {"weekly": True, "gc": True, "b1": b1,
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
@@ -1006,8 +1088,22 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
     no_heavy_decline = ~(_dvs > _rvs)
+    # S1/大风车排除
+    _s1p = HUANGBAI_S1_PERIOD
+    _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+    _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
+    _s1 = _accel & _big_vol & _big_yin
+    _upper_shadow = H - np.maximum(O, C)
+    _lower_shadow = np.minimum(O, C) - L
+    _body = ABS(C - O)
+    _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
+    _hist_vol = V == HHV(V, 120)
+    _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
+    no_s1_dafengche = ~EXIST(_s1 | _dafengche, _s1p)
     vol_expand_ok = (has_vol_expand & no_shrinkage_surge
-                     & no_consec_limit_shrink & no_heavy_decline)
+                     & no_consec_limit_shrink & no_heavy_decline
+                     & no_s1_dafengche)
 
     # 筹码密集度（COST近似）
     _chip_period = 60

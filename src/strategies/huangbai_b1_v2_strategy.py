@@ -37,6 +37,7 @@ from config import (
     HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
     HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
     HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
+    HUANGBAI_S1_PERIOD,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 
@@ -383,8 +384,22 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
         _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
         no_heavy_decline = ~(_dvs > _rvs)
+        # S1/大风车排除：加速上涨后出现放天量大阴线或历史天量长上下影阴线
+        _s1p = HUANGBAI_S1_PERIOD
+        _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+        _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+        _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
+        _s1 = _accel & _big_vol & _big_yin
+        _upper_shadow = H - np.maximum(O, C)
+        _lower_shadow = np.minimum(O, C) - L
+        _body = ABS(C - O)
+        _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
+        _hist_vol = V == HHV(V, 120)
+        _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
+        no_s1_dafengche = ~EXIST(_s1 | _dafengche, _s1p)
         self._vol_expand_ok = (has_vol_expand & no_shrinkage_surge
-                               & no_consec_limit_shrink & no_heavy_decline)
+                               & no_consec_limit_shrink & no_heavy_decline
+                               & no_s1_dafengche)
 
     # ------------------------------------------------------------------ #
     #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
@@ -663,8 +678,22 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values[i]
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values[i]
     no_heavy_decline = not (_dvs > _rvs)
+    # S1/大风车排除
+    _s1p = HUANGBAI_S1_PERIOD
+    _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+    _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
+    _s1 = _accel & _big_vol & _big_yin
+    _upper_shadow = H - np.maximum(O, C)
+    _lower_shadow = np.minimum(O, C) - L
+    _body = ABS(C - O)
+    _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
+    _hist_vol = V == HHV(V, 120)
+    _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
+    no_s1_dafengche = not EXIST(_s1 | _dafengche, _s1p)[i]
     vol_expand_ok = (has_vol_expand and no_shrinkage_surge
-                     and no_consec_limit_shrink and no_heavy_decline)
+                     and no_consec_limit_shrink and no_heavy_decline
+                     and no_s1_dafengche)
 
     if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
@@ -1129,8 +1158,22 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
     no_heavy_decline = ~(_dvs > _rvs)
+    # S1/大风车排除
+    _s1p = HUANGBAI_S1_PERIOD
+    _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+    _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
+    _s1 = _accel & _big_vol & _big_yin
+    _upper_shadow = H - np.maximum(O, C)
+    _lower_shadow = np.minimum(O, C) - L
+    _body = ABS(C - O)
+    _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
+    _hist_vol = V == HHV(V, 120)
+    _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
+    no_s1_dafengche = ~EXIST(_s1 | _dafengche, _s1p)
     vol_expand_ok = (has_vol_expand & no_shrinkage_surge
-                     & no_consec_limit_shrink & no_heavy_decline)
+                     & no_consec_limit_shrink & no_heavy_decline
+                     & no_s1_dafengche)
 
     # 筹码密集度（COST近似）
     _chip_period = 60
