@@ -80,7 +80,8 @@ MACD 参数由 `config.py` 配置：`MARKET_MACD_FAST=12`, `MARKET_MACD_SLOW=26`
 
 ### 代码审查修复记录（2026-04）
 
-- **移除 `_mid_yang_triggered` 死代码**：该变量在 `_check_exit()` 中被赋值但从未读取，属于遗留死代码，已从 `__init__`、`_check_entry`、`_check_exit`、`_reset_position_state` 中清除
+- **`_mid_yang_triggered` 一次性触发保护**：中阳卖1/3 触发后标记 `_mid_yang_triggered=True`，确保每次持仓仅触发一次，避免中阳持续期间每天重复卖出。Backtrader 策略类中通过 `_reset_position_state()` 在清仓时重置；PortfolioSimulator 中 `Position` 对象新建时默认 `False`
+- **中阳卖1/3 当日上涨前置条件**：除累计盈利达标外，还需当日收盘价 > 前一日收盘价（`daily_up = price > prev_close`），防止股票持续下跌时误触发中阳卖出
 - **修复 `_compute_signals()` 除零风险**：`daily_pct` 计算添加 `C[i-1] > 0` 保护
 - **优化 `compute_market_macd_for_trading_days`**：用 `pd.Series.reindex(method='ffill')` 替代 O(n*m) 嵌套循环
 - **优化 `preload_all_signals` 日期收集**：用 `DatetimeIndex.union` 替代 set + sorted，移除无意义的 `hasattr` 检查

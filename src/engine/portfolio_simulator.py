@@ -440,18 +440,22 @@ class PortfolioSimulator:
                                 pos.hold_until_below_white = True
                         continue
 
-            # 6. 中阳卖1/3（半仓模式使用更高阈值）
-            if pos.hold_until_below_white:
-                mid_yang = 15 if self._stock_type == "tech" else 8
-            else:
-                mid_yang = 10 if self._stock_type == "tech" else 5
-            if pct_gain >= mid_yang:
-                sell_size = max(1, pos.size // 3)
-                if sell_size < pos.size:
-                    self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
-                    pos.mid_yang_triggered = True
-                    if pos.size <= pos.initial_size // 2:
-                        pos.hold_until_below_white = True
+            # 6. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
+            if not pos.mid_yang_triggered and idx >= 1:
+                prev_close = sig["close"][idx - 1]
+                daily_up = price > prev_close if prev_close > 0 else False
+                if daily_up:
+                    if pos.hold_until_below_white:
+                        mid_yang = 15 if self._stock_type == "tech" else 8
+                    else:
+                        mid_yang = 10 if self._stock_type == "tech" else 5
+                    if pct_gain >= mid_yang:
+                        sell_size = max(1, pos.size // 3)
+                        if sell_size < pos.size:
+                            self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
+                            pos.mid_yang_triggered = True
+                            if pos.size <= pos.initial_size // 2:
+                                pos.hold_until_below_white = True
 
         for code in to_remove:
             del self._positions[code]

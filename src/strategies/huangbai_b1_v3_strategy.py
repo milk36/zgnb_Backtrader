@@ -410,8 +410,9 @@ class HuangBaiB1V3Strategy(BaseStrategy):
                     self.hold_until_below_white = True
             return
 
-        # 6. 中阳卖1/3（半仓模式下不触发）
-        if not self.hold_until_below_white:
+        # 6. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
+        daily_up = price > self.data.close[-1] if self.data.close[-1] > 0 else False
+        if not self.hold_until_below_white and not self._mid_yang_triggered and daily_up:
             mid_yang = 10 if self.p.stock_type == "tech" else 5
             if pct_gain >= mid_yang:
                 sell_size = max(1, int(self.position.size / 3))

@@ -161,6 +161,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
         self._last_sl_bar = None
+        self._mid_yang_triggered = False
 
         # 计算个股指标
         self.indicators()
@@ -517,13 +518,15 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     self.hold_until_below_white = True
             return
 
-        # 6. 中阳卖1/3（半仓模式下不触发）
-        if not self.hold_until_below_white:
+        # 6. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
+        daily_up = price > self.data.close[-1] if self.data.close[-1] > 0 else False
+        if not self.hold_until_below_white and not self._mid_yang_triggered and daily_up:
             mid_yang = 10 if self.p.stock_type == "tech" else 5
             if pct_gain >= mid_yang:
                 sell_size = max(1, int(self.position.size / 3))
                 if sell_size < self.position.size:
                     self.order = self.sell(size=sell_size)
+                    self._mid_yang_triggered = True
                     self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     if self.position.size - sell_size <= self.initial_size / 2:
                         self.hold_until_below_white = True
@@ -534,6 +537,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.stop_loss_price = None
         self.hold_until_below_white = False
         self.initial_size = 0
+        self._mid_yang_triggered = False
 
     def log(self, txt: str, dt=None):
         if self.p.print_log:
