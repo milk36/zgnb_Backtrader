@@ -55,6 +55,8 @@
 | `--portfolio` | flag | - | 组合级模拟模式（仅 `huangbai` 系列需要，`dongneng_zhuan` 默认即为组合模拟） |
 | `--no-plot` | flag | - | 禁用回测结果绘图（仅指定股票回测模式有图） |
 | `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。仅 V1/V2/V3 `--portfolio` 模式有效 |
+| `--update-qfq-cache` | flag | - | 批量更新前复权缓存（需要网络）。不指定 `--update-qfq-codes` 时自动扫描通达信目录获取全市场股票列表 |
+| `--update-qfq-codes` | str[] | 无 | 指定更新前复权缓存的股票代码，需配合 `--update-qfq-cache` 使用 |
 
 ### 常用命令示例
 
@@ -115,6 +117,16 @@ python main.py --strategy dongneng_zhuan --scan
 
 # 仅扫描选股
 python main.py --strategy dongneng_zhuan --scan-only
+```
+
+#### 前复权缓存管理
+
+```bash
+# 全市场更新前复权缓存（首次运行，需要网络）
+python main.py --update-qfq-cache
+
+# 指定股票更新缓存
+python main.py --update-qfq-cache --update-qfq-codes 300733 600036
 ```
 
 #### KDJ 策略

@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import os
 
 from config import (
     INITIAL_CASH,
@@ -62,6 +63,8 @@ def parse_args():
     parser.add_argument("--no-plot", action="store_true", help="禁用绘图")
     parser.add_argument("--portfolio", action="store_true", help="组合级模拟（正确的时间序列模拟）")
     parser.add_argument("--chart", action="store_true", help="生成交易K线图（保存到charts/目录）")
+    parser.add_argument("--update-qfq-cache", action="store_true", help="批量更新前复权缓存（需要网络）")
+    parser.add_argument("--update-qfq-codes", nargs="+", default=None, help="指定更新前复权缓存的股票代码")
     return parser.parse_args()
 
 
@@ -104,6 +107,29 @@ def _run_backtest(symbols, args, strategy_cls=None):
 
 def main():
     args = parse_args()
+
+    # ---- 前复权缓存更新 ----
+    if args.update_qfq_cache:
+        from src.data.adjustment import update_cache_batch
+        if args.update_qfq_codes:
+            codes = args.update_qfq_codes
+        else:
+            from mootdx.reader import Reader
+            from config import TDX_DIR, TDX_MARKET
+            reader = Reader.factory(market=TDX_MARKET, tdxdir=TDX_DIR)
+            import glob
+            sh_files = glob.glob(os.path.join(TDX_DIR, "vipdoc", "sh", "lday", "sh6*.day"))
+            sz_files = glob.glob(os.path.join(TDX_DIR, "vipdoc", "sz", "lday", "sz0*.day"))
+            sz3_files = glob.glob(os.path.join(TDX_DIR, "vipdoc", "sz", "lday", "sz3*.day"))
+            import os
+            codes = []
+            for f in sh_files + sz_files + sz3_files:
+                code = os.path.basename(f)[2:8]
+                codes.append(code)
+            print(f"共发现 {len(codes)} 只股票")
+        update_cache_batch(codes)
+        return
+
     strategy_cls = STRATEGIES[args.strategy]
 
     # ---- 动能砖策略 ----

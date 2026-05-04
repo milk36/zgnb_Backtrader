@@ -763,6 +763,8 @@ def _init_process(tdxdir, market):
     """子进程初始化：每个进程创建自己的 Reader"""
     global _process_reader
     _process_reader = Reader.factory(market=market, tdxdir=tdxdir)
+    from src.data.adjustment import preload_disk_cache
+    preload_disk_cache()
 
 
 def _scan_one(code, params, skip_weekly, skip_gc):
@@ -772,6 +774,8 @@ def _scan_one(code, params, skip_weekly, skip_gc):
         if df is None or len(df) < 300:
             return code, None, False
         df = df.sort_index()
+        from src.data.adjustment import apply_qfq
+        df = apply_qfq(df, code)
         sig = _compute_signals(
             df["close"].values.astype(float),
             df["high"].values.astype(float),
@@ -1142,6 +1146,8 @@ def _scan_one_all_bars(code, params):
         if df is None or len(df) < 300:
             return code, None, False
         df = df.sort_index()
+        from src.data.adjustment import apply_qfq
+        df = apply_qfq(df, code)
         signals = _compute_all_bar_signals(
             df["close"].values.astype(float),
             df["high"].values.astype(float),

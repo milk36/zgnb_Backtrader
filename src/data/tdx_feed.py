@@ -22,6 +22,8 @@ class TdxDataFeed:
         df = self._reader.daily(symbol=symbol)
         if df is None or df.empty:
             raise ValueError(f"无法读取股票 {symbol} 的数据，请检查代码和通达信路径")
+        from src.data.adjustment import apply_qfq
+        df = apply_qfq(df, symbol)
         df = self._normalize(df, start, end)
         return bt.feeds.PandasData(dataname=df)
 

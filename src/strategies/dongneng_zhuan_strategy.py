@@ -570,6 +570,8 @@ _process_reader = None
 def _init_process(tdxdir, market):
     global _process_reader
     _process_reader = Reader.factory(market=market, tdxdir=tdxdir)
+    from src.data.adjustment import preload_disk_cache
+    preload_disk_cache()
 
 
 def _scan_one(code, params):
@@ -578,6 +580,8 @@ def _scan_one(code, params):
         if df is None or len(df) < 300:
             return code, None, False
         df = df.sort_index()
+        from src.data.adjustment import apply_qfq
+        df = apply_qfq(df, code)
         stock_params = dict(params)
         capital_data = params.get("capital_data")
         if capital_data:
@@ -677,6 +681,8 @@ def _scan_one_all_bars(code, params):
         if df is None or len(df) < 300:
             return code, None, False
         df = df.sort_index()
+        from src.data.adjustment import apply_qfq
+        df = apply_qfq(df, code)
         stock_params = dict(params)
         capital_data = params.get("capital_data")
         if capital_data:
