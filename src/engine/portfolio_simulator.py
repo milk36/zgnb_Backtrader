@@ -430,7 +430,8 @@ class PortfolioSimulator:
             if idx >= 1:
                 prev_close = sig["close"][idx - 1]
                 if prev_close > 0:
-                    limit_pct = 1.20 if self._stock_type == "tech" else 1.10
+                    _is_tech = code[:2] in ("30", "68")
+                    limit_pct = 1.20 if _is_tech else 1.10
                     limit_up_price = round(prev_close * limit_pct, 2)
                     if high >= limit_up_price:
                         sell_size = max(1, pos.size // 2)
@@ -446,9 +447,9 @@ class PortfolioSimulator:
                 daily_up = price > prev_close if prev_close > 0 else False
                 if daily_up:
                     if pos.hold_until_below_white:
-                        mid_yang = 15 if self._stock_type == "tech" else 8
+                        mid_yang = 15 if code[:2] in ("30", "68") else 8
                     else:
-                        mid_yang = 10 if self._stock_type == "tech" else 5
+                        mid_yang = 10 if code[:2] in ("30", "68") else 5
                     if pct_gain >= mid_yang:
                         sell_size = max(1, pos.size // 3)
                         if sell_size < pos.size:
