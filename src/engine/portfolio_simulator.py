@@ -21,6 +21,7 @@ class Position:
         "white_at_buy", "yellow_at_buy", "stop_loss",
         "size", "initial_size", "hold_until_below_white",
         "mid_yang_triggered", "partial_proceeds",
+        "momentum_hold", "consecutive_tp_days", "consecutive_down_days",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -37,6 +38,9 @@ class Position:
         self.hold_until_below_white = False
         self.mid_yang_triggered = False
         self.partial_proceeds = 0.0  # 部分卖出累计回款
+        self.momentum_hold = False
+        self.consecutive_tp_days = 0
+        self.consecutive_down_days = 0
 
 
 class PortfolioSimulator:
@@ -426,13 +430,51 @@ class PortfolioSimulator:
                     continue
                 # 未清仓：仍允许涨停卖1/2和中阳卖1/3
 
-            # 5. 涨停卖1/2（半仓模式下仍可触发，不受中阳标记限制）
+            # 5. 动量持股逻辑（连续止盈后持股待涨）
             if idx >= 1:
                 prev_close = sig["close"][idx - 1]
                 if prev_close > 0:
                     _is_tech = code[:2] in ("30", "68")
                     limit_pct = 1.20 if _is_tech else 1.10
                     limit_up_price = round(prev_close * limit_pct, 2)
+                    daily_up = price > prev_close
+                    if pos.hold_until_below_white:
+                        mid_yang = 15 if _is_tech else 8
+                    else:
+                        mid_yang = 10 if _is_tech else 5
+                    hit_limit_up = high >= limit_up_price
+                    hit_mid_yang = daily_up and pct_gain >= mid_yang
+                    tp_met = hit_limit_up or hit_mid_yang
+
+                    if pos.momentum_hold:
+                        # 动量持股模式：检测退出条件
+                        if price < prev_close:
+                            pos.consecutive_down_days += 1
+                        else:
+                            pos.consecutive_down_days = 0
+                        drop_pct = (prev_close - price) / prev_close * 100
+                        drop_threshold = 14.0 if _is_tech else 7.0
+                        if pos.consecutive_down_days >= 2 or drop_pct > drop_threshold:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            self._sell_position(code, pos, price, date, "动量结束清仓")
+                            to_remove.append(code)
+                            continue
+                        # 未退出动量持股，跳过后续涨停/中阳
+                        continue
+
+                    # 正常模式：累计连续止盈天数
+                    if tp_met:
+                        pos.consecutive_tp_days += 1
+                    else:
+                        pos.consecutive_tp_days = 0
+
+                    if pos.consecutive_tp_days >= 3:
+                        pos.momentum_hold = True
+                        continue  # 第3天不卖，进入动量持股
+
+                    # 6. 涨停卖1/2（半仓模式下仍可触发，不受中阳标记限制）
                     if high >= limit_up_price:
                         sell_size = max(1, pos.size // 2)
                         if sell_size < pos.size:
@@ -441,22 +483,15 @@ class PortfolioSimulator:
                                 pos.hold_until_below_white = True
                         continue
 
-            # 6. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
-            if not pos.mid_yang_triggered and idx >= 1:
-                prev_close = sig["close"][idx - 1]
-                daily_up = price > prev_close if prev_close > 0 else False
-                if daily_up:
-                    if pos.hold_until_below_white:
-                        mid_yang = 15 if code[:2] in ("30", "68") else 8
-                    else:
-                        mid_yang = 10 if code[:2] in ("30", "68") else 5
-                    if pct_gain >= mid_yang:
-                        sell_size = max(1, pos.size // 3)
-                        if sell_size < pos.size:
-                            self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
-                            pos.mid_yang_triggered = True
-                            if pos.size <= pos.initial_size // 2:
-                                pos.hold_until_below_white = True
+                    # 7. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
+                    if not pos.mid_yang_triggered and daily_up:
+                        if pct_gain >= mid_yang:
+                            sell_size = max(1, pos.size // 3)
+                            if sell_size < pos.size:
+                                self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
+                                pos.mid_yang_triggered = True
+                                if pos.size <= pos.initial_size // 2:
+                                    pos.hold_until_below_white = True
 
         for code in to_remove:
             del self._positions[code]

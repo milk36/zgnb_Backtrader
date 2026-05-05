@@ -163,6 +163,9 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.initial_size = 0
         self._last_sl_bar = None
         self._mid_yang_triggered = False
+        self._momentum_hold = False
+        self._consecutive_tp_days = 0
+        self._consecutive_down_days = 0
 
         # 计算个股指标
         self.indicators()
@@ -519,10 +522,45 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     return
             # 未清仓：继续检查涨停卖1/2
 
-        # 5. 涨停卖1/2（半仓模式下仍可触发）
+        # 5. 动量持股逻辑（连续止盈后持股待涨）
         limit_pct = 1.20 if self.p.stock_type == "tech" else 1.10
         prev_close = self.data.close[-1]
         limit_up_price = round(prev_close * limit_pct, 2)
+        daily_up = price > prev_close if prev_close > 0 else False
+        if self.hold_until_below_white:
+            mid_yang = 15 if self.p.stock_type == "tech" else 8
+        else:
+            mid_yang = 10 if self.p.stock_type == "tech" else 5
+        hit_limit_up = high >= limit_up_price
+        hit_mid_yang = daily_up and pct_gain >= mid_yang
+        tp_met = hit_limit_up or hit_mid_yang
+
+        if self._momentum_hold:
+            # 动量持股模式：检测退出条件
+            if price < prev_close:
+                self._consecutive_down_days += 1
+            else:
+                self._consecutive_down_days = 0
+            drop_pct = (prev_close - price) / prev_close * 100 if prev_close > 0 else 0
+            drop_threshold = 14.0 if self.p.stock_type == "tech" else 7.0
+            if self._consecutive_down_days >= 2 or drop_pct > drop_threshold:
+                self.order = self.order_target_percent(target=0.0)
+                self._last_sl_bar = len(self)
+                self.log(f"动量结束清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                self._reset_position_state()
+            return
+
+        # 正常模式：累计连续止盈天数
+        if tp_met:
+            self._consecutive_tp_days += 1
+        else:
+            self._consecutive_tp_days = 0
+
+        if self._consecutive_tp_days >= 3:
+            self._momentum_hold = True
+            return  # 第3天不卖，进入动量持股
+
+        # 6. 涨停卖1/2（半仓模式下仍可触发）
         if high >= limit_up_price:
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
@@ -533,10 +571,8 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     self.hold_until_below_white = True
             return
 
-        # 6. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
-        daily_up = price > self.data.close[-1] if self.data.close[-1] > 0 else False
+        # 7. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
         if not self.hold_until_below_white and not self._mid_yang_triggered and daily_up:
-            mid_yang = 10 if self.p.stock_type == "tech" else 5
             if pct_gain >= mid_yang:
                 sell_size = max(1, int(self.position.size / 3))
                 if sell_size < self.position.size:
@@ -553,6 +589,9 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
         self._mid_yang_triggered = False
+        self._momentum_hold = False
+        self._consecutive_tp_days = 0
+        self._consecutive_down_days = 0
 
     def log(self, txt: str, dt=None):
         if self.p.print_log:
