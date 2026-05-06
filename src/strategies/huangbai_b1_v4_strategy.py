@@ -357,8 +357,7 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _lp = 1.20 if self.p.stock_type == "tech" else 1.10
         _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
         _limit_shrink = _limit_up & (V < REF(V, 1))
-        _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
-        no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+        no_consec_limit_shrink = COUNT(_limit_shrink.astype(float), _vep) < 1
         _rise_v = np.where(C > REF(C, 1), V, 0)
         _decline_v = np.where(C < REF(C, 1), V, 0)
         _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
@@ -734,8 +733,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
     _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
     _limit_shrink = _limit_up & (V < REF(V, 1))
-    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
-    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep)[i] < 1
+    no_consec_limit_shrink = COUNT(_limit_shrink.astype(float), _vep)[i] < 1
     _rise_v = np.where(C > REF(C, 1), V, 0)
     _decline_v = np.where(C < REF(C, 1), V, 0)
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values[i]
@@ -1206,8 +1204,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
     _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
     _limit_shrink = _limit_up & (V < REF(V, 1))
-    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
-    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+    no_consec_limit_shrink = COUNT(_limit_shrink.astype(float), _vep) < 1
     _rise_v = np.where(C > REF(C, 1), V, 0)
     _decline_v = np.where(C < REF(C, 1), V, 0)
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values

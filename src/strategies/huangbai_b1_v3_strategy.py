@@ -739,8 +739,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
     _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
     _limit_shrink = _limit_up & (V < REF(V, 1))
-    _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
-    no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
+    no_consec_limit_shrink = COUNT(_limit_shrink.astype(float), _vep) < 1
     # 连续上涨后放量下跌排除
     _rise_v = np.where(C > REF(C, 1), V, 0)
     _decline_v = np.where(C < REF(C, 1), V, 0)
