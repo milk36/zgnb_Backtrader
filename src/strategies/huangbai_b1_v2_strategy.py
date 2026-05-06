@@ -163,6 +163,8 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.initial_size = 0
         self._last_sl_bar = None
         self._mid_yang_triggered = False
+        self._profit_100pct = False
+        self._profit_100pct_down_days = 0
         self._momentum_hold = False
         self._consecutive_tp_days = 0
         self._consecutive_down_days = 0
@@ -496,12 +498,21 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
-        # 3. 盈利100%清仓
+        # 3. 盈利100%后连跌2天清仓
+        if self._profit_100pct:
+            prev_close = self.data.close[-1]
+            if price < prev_close:
+                self._profit_100pct_down_days += 1
+            else:
+                self._profit_100pct_down_days = 0
+            if self._profit_100pct_down_days >= 2:
+                self.order = self.order_target_percent(target=0.0)
+                self._last_sl_bar = len(self)
+                self.log(f"盈利100%连跌清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                self._reset_position_state()
+            return
         if pct_gain >= 100:
-            self.order = self.order_target_percent(target=0.0)
-            self._last_sl_bar = len(self)
-            self.log(f"盈利100%清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
-            self._reset_position_state()
+            self._profit_100pct = True
             return
 
         # 4. 半仓持股模式（仅涨停可卖1/2，中阳不再触发）
@@ -543,7 +554,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                 self._consecutive_down_days = 0
             drop_pct = (prev_close - price) / prev_close * 100 if prev_close > 0 else 0
             drop_threshold = 14.0 if self.p.stock_type == "tech" else 7.0
-            if self._consecutive_down_days >= 2 or drop_pct > drop_threshold:
+            if drop_pct > drop_threshold:
                 self.order = self.order_target_percent(target=0.0)
                 self._last_sl_bar = len(self)
                 self.log(f"动量结束清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
@@ -589,6 +600,8 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
         self._mid_yang_triggered = False
+        self._profit_100pct = False
+        self._profit_100pct_down_days = 0
         self._momentum_hold = False
         self._consecutive_tp_days = 0
         self._consecutive_down_days = 0

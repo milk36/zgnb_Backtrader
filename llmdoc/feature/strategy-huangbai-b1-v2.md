@@ -74,7 +74,7 @@ MACD 参数由 `config.py` 配置：`MARKET_MACD_FAST=12`, `MARKET_MACD_SLOW=26`
 - S1/大风车排除（V1/V2 三处同步：`indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`）：近 `HUANGBAI_S1_PERIOD`(20) 天内出现 S1（加速上涨+天量+大阴线）或大风车（加速上涨+历史天量+长上下影阴线+阴量）则排除，OR 关系
 - 单股回测时 V2 自动加载大盘指数作为第二数据源（`data1`），加载失败则跳过大盘过滤并打印警告
 - `scan_all()` 返回元组 `(results, market_macd_ok)`，与 V1 的 `results` 不同，调用方需注意解包
-- **动量持股逻辑（V2 新增）**：连续3天触发止盈条件（涨停或中阳）后进入动量持股模式，不再触发涨停卖半和中阳卖1/3，直到满足退出条件（连续2天收跌 或 当日跌幅超过阈值：主板7%/创业板科创板14%）。状态变量 `_momentum_hold`、`_consecutive_tp_days`、`_consecutive_down_days` 在 `_reset_position_state()` 中重置。此逻辑仅存在于 V2 策略类和 PortfolioSimulator 中，V1/V3 不含此逻辑。
+- **动量持股逻辑（V2 新增）**：连续3天触发止盈条件（涨停或中阳）后进入动量持股模式，不再触发涨停卖半和中阳卖1/3，直到满足退出条件（当日跌幅超过阈值：主板7%/创业板科创板14%）。状态变量 `_momentum_hold`、`_consecutive_tp_days`、`_consecutive_down_days` 在 `_reset_position_state()` 中重置。此逻辑仅存在于 V2 策略类和 PortfolioSimulator 中，V1/V3 不含此逻辑。
 - `preload_all_signals()` 返回三元组，V1 返回二元组
 - `_compute_signals()` 与 `_compute_all_bar_signals()` 中的个股指标逻辑与 V1 相同，大盘 MACD 在调用方或模拟器层面过滤
 - `_scan_one_all_bars()` 返回的信号字典包含 `avg_amount_20` 字段（20日成交额均值），供 PortfolioSimulator 选股排序使用

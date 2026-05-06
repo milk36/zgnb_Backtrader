@@ -22,6 +22,7 @@ class Position:
         "size", "initial_size", "hold_until_below_white",
         "mid_yang_triggered", "partial_proceeds",
         "momentum_hold", "consecutive_tp_days", "consecutive_down_days",
+        "profit_100pct", "profit_100pct_down_days",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -41,6 +42,8 @@ class Position:
         self.momentum_hold = False
         self.consecutive_tp_days = 0
         self.consecutive_down_days = 0
+        self.profit_100pct = False
+        self.profit_100pct_down_days = 0
 
 
 class PortfolioSimulator:
@@ -381,17 +384,28 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. 盈利100%清仓（基于实际总收益，含部分卖出回款）
+            # 3. 盈利100%后连跌2天清仓（基于实际总收益，含部分卖出回款）
             total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
             current_value = pos.size * price * (1 - self._commission)
             total_proceeds = pos.partial_proceeds + current_value
             total_pnl_pct = (total_proceeds - total_cost) / total_cost * 100
+            if pos.profit_100pct:
+                prev_close = sig["close"][idx - 1] if idx >= 1 else 0
+                if prev_close > 0 and price < prev_close:
+                    pos.profit_100pct_down_days += 1
+                else:
+                    pos.profit_100pct_down_days = 0
+                if pos.profit_100pct_down_days >= 2:
+                    cur_idx = self._td_index.get(date)
+                    if cur_idx is not None:
+                        self._cooldown[code] = cur_idx
+                    self._sell_position(code, pos, price, date, "盈利100%连跌清仓")
+                    to_remove.append(code)
+                    continue
+                # 未连跌2天，继续持股，跳过后续卖出
+                continue
             if total_pnl_pct >= 100:
-                cur_idx = self._td_index.get(date)
-                if cur_idx is not None:
-                    self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, price, date, "盈利100%清仓")
-                to_remove.append(code)
+                pos.profit_100pct = True
                 continue
 
             # 4. 半仓持股模式（跌破白线/摊薄成本价/黄线可清仓）
@@ -454,7 +468,7 @@ class PortfolioSimulator:
                             pos.consecutive_down_days = 0
                         drop_pct = (prev_close - price) / prev_close * 100
                         drop_threshold = 14.0 if _is_tech else 7.0
-                        if pos.consecutive_down_days >= 2 or drop_pct > drop_threshold:
+                        if drop_pct > drop_threshold:
                             cur_idx = self._td_index.get(date)
                             if cur_idx is not None:
                                 self._cooldown[code] = cur_idx
