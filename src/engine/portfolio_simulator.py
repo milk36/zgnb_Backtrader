@@ -21,6 +21,7 @@ class Position:
         "white_at_buy", "yellow_at_buy", "stop_loss",
         "size", "initial_size", "hold_until_below_white",
         "mid_yang_triggered", "partial_proceeds",
+        "partial_sold",
         "momentum_hold", "consecutive_tp_days", "consecutive_down_days",
         "profit_100pct", "profit_100pct_down_days",
     )
@@ -39,6 +40,7 @@ class Position:
         self.hold_until_below_white = False
         self.mid_yang_triggered = False
         self.partial_proceeds = 0.0  # 部分卖出累计回款
+        self.partial_sold = False   # 是否发生过部分卖出
         self.momentum_hold = False
         self.consecutive_tp_days = 0
         self.consecutive_down_days = 0
@@ -408,23 +410,76 @@ class PortfolioSimulator:
                 pos.profit_100pct = True
                 continue
 
+            # 3.5 部分卖出后白线/黄线跟踪止损
+            if pos.partial_sold and not pos.hold_until_below_white:
+                sold = False
+                wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
+                if real_gain <= 20:
+                    if wy_gap_pct <= 10:
+                        if price <= avg_cost or price < yellow_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            reason = "部分卖出后跌破黄线" if price < yellow_val else "部分卖出后跌破成本"
+                            self._sell_position(code, pos, price, date, reason)
+                            to_remove.append(code)
+                            sold = True
+                    else:
+                        if price <= avg_cost or price < white_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            reason = "部分卖出后跌破白线" if price < white_val else "部分卖出后跌破成本"
+                            self._sell_position(code, pos, price, date, reason)
+                            to_remove.append(code)
+                            sold = True
+                else:
+                    if wy_gap_pct <= 10:
+                        if price < yellow_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            self._sell_position(code, pos, price, date, "部分卖出后跌破黄线")
+                            to_remove.append(code)
+                            sold = True
+                    else:
+                        if price < white_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            self._sell_position(code, pos, price, date, "部分卖出后跌破白线")
+                            to_remove.append(code)
+                            sold = True
+                if sold:
+                    continue
+
             # 4. 半仓持股模式（跌破白线/摊薄成本价/黄线可清仓）
             if pos.hold_until_below_white:
                 sold = False
+                wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
                 if real_gain <= 20:
-                    # 盈利20%以内：跌破白线或摊薄成本价清仓
-                    if price < white_val or price <= avg_cost:
-                        cur_idx = self._td_index.get(date)
-                        if cur_idx is not None:
-                            self._cooldown[code] = cur_idx
-                        reason = "半仓跌破白线" if price < white_val else "半仓盈转亏清仓"
-                        self._sell_position(code, pos, price, date, reason)
-                        to_remove.append(code)
-                        sold = True
+                    if wy_gap_pct <= 10:
+                        if price <= avg_cost or price < yellow_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            reason = "半仓跌破黄线" if price < yellow_val else "半仓盈转亏清仓"
+                            self._sell_position(code, pos, price, date, reason)
+                            to_remove.append(code)
+                            sold = True
+                    else:
+                        if price <= avg_cost or price < white_val:
+                            cur_idx = self._td_index.get(date)
+                            if cur_idx is not None:
+                                self._cooldown[code] = cur_idx
+                            reason = "半仓跌破白线" if price < white_val else "半仓盈转亏清仓"
+                            self._sell_position(code, pos, price, date, reason)
+                            to_remove.append(code)
+                            sold = True
                 else:
                     # 盈利>20%：黄白线差值≤5%则跌破黄线清仓，否则跌破白线清仓
                     wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
-                    if wy_gap_pct <= 5:
+                    if wy_gap_pct <= 10:
                         if price < yellow_val:
                             cur_idx = self._td_index.get(date)
                             if cur_idx is not None:
@@ -550,6 +605,7 @@ class PortfolioSimulator:
         pnl = (price - pos.buy_price) / pos.buy_price * 100
         self._cash += proceeds
         pos.partial_proceeds += proceeds
+        pos.partial_sold = True
         pos.size -= sell_size
         self._trade_list.append({
             "code": code,

@@ -25,6 +25,9 @@ python main.py --strategy huangbai_v2 --portfolio --chart
 # V3策略（通达信原始B1公式）
 python main.py --strategy huangbai_v3 --portfolio --chart
 
+# V4策略（无金叉条件）
+python main.py --strategy huangbai_v4 --portfolio --chart
+
 # 全市场选股扫描（仅看结果）
 python main.py --scan-only
 
@@ -55,6 +58,7 @@ main.py (CLI入口, argparse参数解析, 4种运行模式分发)
       huangbai_b1_strategy.py      -- V1: 含scan_all/preload_all_signals
       huangbai_b1_v2_strategy.py   -- V2: +大盘MACD过滤
       huangbai_b1_v3_strategy.py   -- V3: +共享B1函数消除同步问题
+      huangbai_b1_v4_strategy.py   -- V4: 移除金叉条件，保留大盘MACD+B1
       dongneng_zhuan_strategy.py   -- 动能+砖: 双引擎串行过滤
     engine/
       backtester.py              -- 单股Backtrader Cerebro封装
@@ -84,7 +88,7 @@ B1逻辑变更时，V1/V2需同步三处（`indicators()`、`_compute_signals()`
 
 | 模拟器 | 策略 | 资金/仓位 | 特点 |
 |--------|------|-----------|------|
-| `PortfolioSimulator` | 黄白线V1/V2/V3 | 100万/10只/每只10万 | 月更新观察池, 六级退出 |
+| `PortfolioSimulator` | 黄白线V1/V2/V3/V4 | 100万/10只/每只10万 | 月更新观察池, 六级退出 |
 | `DongnengZhuanSimulator` | 动能+砖 | 10万/2只/每只5万 | T+1分钟确认买入, 五级退出 |
 
 两者都是纯 numpy/pandas 日频模拟引擎，不依赖 Backtrader。
@@ -145,7 +149,7 @@ B1逻辑变更时，V1/V2需同步三处（`indicators()`、`_compute_signals()`
 - 修改黄白线B1逻辑时，V1/V2需同步三处函数（见上文），V3只需改 `_compute_v3_b1()`
 - 组合模拟器中的卖出逻辑必须与对应策略类保持一致
 - `_compute_signals()` 和 `indicators()` 是同一逻辑的两种实现，修改一处必须同步另一处
-- V2/V3的 `scan_all()` 和 `preload_all_signals()` 返回三元组（含 `market_macd_bullish`），V1返回二元组
+- V2/V3/V4的 `scan_all()` 和 `preload_all_signals()` 返回三元组（含 `market_macd_bullish`），V1返回二元组
 - 周线计算使用 `resample('W-FRI')` 以周五为周结束日
 - 所有策略最后一个交易日只卖不买,因为A股不支持T+0,避免组合模拟器中最后一天无交易记录
 - 所有组合回测报告中只统计单支股票的盈亏情况来计算胜率,并且基于每支股票的盈利情况从高到底排序

@@ -105,6 +105,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.initial_size = 0
         self._last_sl_bar = None
         self._mid_yang_triggered = False
+        self._partial_sold = False
         self.indicators()
 
     # ------------------------------------------------------------------ #
@@ -439,15 +440,62 @@ class HuangBaiB1Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
+        # --- 3.5 部分卖出后白线/黄线跟踪止损 ---
+        if self._partial_sold and not self.hold_until_below_white:
+            yellow_val = self._yellow[idx]
+            wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
+            if pct_gain <= 20:
+                if wy_gap_pct <= 10:
+                    if price < yellow_val:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        self.log(f"部分卖出后跌破黄线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
+                else:
+                    if price < white_val:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        self.log(f"部分卖出后跌破白线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
+            else:
+                if wy_gap_pct <= 10:
+                    if price < yellow_val:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        self.log(f"部分卖出后跌破黄线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
+                else:
+                    if price < white_val:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        self.log(f"部分卖出后跌破白线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
+
         # --- 4. 半仓持股模式（仅涨停可卖1/2，中阳不再触发） ---
         if self.hold_until_below_white:
+            yellow_val = self._yellow[idx]
+            wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
             if pct_gain <= 20:
-                if price <= self.buy_info["price"]:
-                    self.order = self.order_target_percent(target=0.0)
-                    self._last_sl_bar = len(self)
-                    self.log(f"半仓盈转亏清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
-                    self._reset_position_state()
-                    return
+                if wy_gap_pct <= 10:
+                    if price <= self.buy_info["price"] or price < yellow_val:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        reason = "半仓跌破黄线" if price < yellow_val else "半仓盈转亏清仓"
+                        self.log(f"{reason} @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
+                else:
+                    if price <= self.buy_info["price"] or price < white_val:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        reason = "半仓跌破白线" if price < white_val else "半仓盈转亏清仓"
+                        self.log(f"{reason} @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
             else:
                 if price < white_val:
                     self.order = self.order_target_percent(target=0.0)
@@ -465,6 +513,7 @@ class HuangBaiB1Strategy(BaseStrategy):
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
+                self._partial_sold = True
                 self.log(f"涨停卖半 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
@@ -478,6 +527,7 @@ class HuangBaiB1Strategy(BaseStrategy):
                 sell_size = max(1, int(self.position.size / 3))
                 if sell_size < self.position.size:
                     self.order = self.sell(size=sell_size)
+                    self._partial_sold = True
                     self._mid_yang_triggered = True
                     self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     if self.position.size - sell_size <= self.initial_size / 2:
@@ -489,6 +539,7 @@ class HuangBaiB1Strategy(BaseStrategy):
         self.stop_loss_price = None
         self.hold_until_below_white = False
         self.initial_size = 0
+        self._partial_sold = False
         # 注意：不重置 _last_sl_bar，冷却期需要保留
 
     def log(self, txt: str, dt=None):

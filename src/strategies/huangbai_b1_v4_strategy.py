@@ -1,17 +1,16 @@
-"""黄白线金叉后B1策略 V2
+"""黄白线周线多头+B1策略 V4
 
-相比 V1 新增：大盘MACD多头区间过滤
-- 大盘（上证指数）MACD处于多头（DIF > DEA）时：正常选股和买入
-- 大盘MACD处于空头（DIF <= DEA）时：只卖不买
+相比 V2 移除：黄白线金叉条件
+保留：大盘MACD多头过滤、周线多头、B1七子条件、vol_expand_ok过滤链
 
 策略逻辑：
 0. 选股范围：沪深A股
 1. 周线多头空间
-2. 大盘MACD处于多头区间（V2新增）
-3. 黄白线金叉
-4. 个股MACD处于多头空间
-5. B1买入信号（7个子条件OR）
-6. 止损/止盈逻辑同V1
+2. 大盘MACD处于多头区间
+3. 个股MACD处于多头空间（预留）
+4. B1买入信号（7个子条件OR）
+5. vol_expand_ok过滤链
+6. 止损/止盈/动量持股逻辑同V2
 """
 
 import os
@@ -34,7 +33,7 @@ from config import (
     TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS, STOCK_TYPE,
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
-    HUANGBAI_T_PLUS_N, HUANGBAI_GC_LOOKBACK,
+    HUANGBAI_T_PLUS_N,
     HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
     HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
     HUANGBAI_S1_PERIOD,
@@ -42,7 +41,7 @@ from config import (
 )
 
 
-# ---------- helpers（复用 V1 逻辑） ----------
+# ---------- helpers（复用 V2 逻辑） ----------
 
 def _ref_at(S, offsets):
     """REF with variable offset"""
@@ -67,7 +66,7 @@ def _weekly_ma(daily_close, dates, period):
     return wma.reindex(s.index, method='ffill').values
 
 
-# ---------- 大盘MACD ----------
+# ---------- 大盘MACD（与V2完全相同） ----------
 
 def load_market_index(tdxdir=TDX_DIR, market=TDX_MARKET):
     """加载上证指数日线数据，返回 DataFrame 或 None"""
@@ -84,13 +83,7 @@ def load_market_index(tdxdir=TDX_DIR, market=TDX_MARKET):
 def compute_market_macd(close, fast=MARKET_MACD_FAST,
                         slow=MARKET_MACD_SLOW,
                         signal=MARKET_MACD_SIGNAL):
-    """计算大盘 MACD 指标
-
-    Returns:
-        dif: MACD 快线 (DIF)
-        dea: MACD 慢线 (DEA/Signal)
-        bullish: bool array - DIF > DEA 为多头
-    """
+    """计算大盘 MACD 指标"""
     dif = EMA(close, fast) - EMA(close, slow)
     dea = EMA(dif, signal)
     bullish = np.where(np.isnan(dif) | np.isnan(dea), False, dif > dea)
@@ -99,14 +92,7 @@ def compute_market_macd(close, fast=MARKET_MACD_FAST,
 
 def compute_market_macd_for_trading_days(trading_days, tdxdir=TDX_DIR,
                                          market=TDX_MARKET):
-    """预计算大盘在每个交易日的MACD多头状态
-
-    Args:
-        trading_days: DatetimeIndex 交易日历
-
-    Returns:
-        market_macd_bullish: np.ndarray[bool] 或 None
-    """
+    """预计算大盘在每个交易日的MACD多头状态"""
     df = load_market_index(tdxdir, market)
     if df is None:
         print("  警告: 无法加载大盘指数数据，大盘MACD过滤将被跳过")
@@ -122,8 +108,8 @@ def compute_market_macd_for_trading_days(trading_days, tdxdir=TDX_DIR,
 
 # ---------- 策略类 ----------
 
-class HuangBaiB1V2Strategy(BaseStrategy):
-    """V2: 周线多头 + 大盘MACD多头 + 黄白线金叉 + B1"""
+class HuangBaiB1V4Strategy(BaseStrategy):
+    """V4: 周线多头 + 大盘MACD多头 + B1（无金叉条件）"""
 
     params = (
         ("print_log", True),
@@ -144,12 +130,8 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         # 周线MA周期
         ("wma30", 30), ("wma60", 60), ("wma120", 120), ("wma240", 240),
 
-        # 金叉回溯
-        ("gc_lookback", HUANGBAI_GC_LOOKBACK),
-
         # 调试
         ("skip_weekly", False),
-        ("skip_gc", False),
         ("skip_market_macd", False),
         ("skip_stock_macd", False),
         ("skip_vol_expand", False),
@@ -180,7 +162,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
             _, _, self._market_macd_bullish = compute_market_macd(market_close)
 
     def indicators(self):
-        """计算个股全部指标（与V1相同）"""
+        """计算个股全部指标（与V2相同，移除金叉计算）"""
         C = np.array(self.data.close.array, dtype=float)
         H = np.array(self.data.high.array, dtype=float)
         L = np.array(self.data.low.array, dtype=float)
@@ -216,11 +198,6 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         valid = (ma30w > 0.01) & (ma60w > 0.01) & (ma120w > 0.01) & (ma240w > 0.01)
         self._weekly_bull = valid & (ma30w > ma60w) & (ma60w > ma120w) & (ma120w > ma240w)
         self._above_ma30w = C > ma30w
-
-        # ---- 黄白线金叉 ----
-        gc_arr = CROSS(self._white, self._yellow)
-        bars_since_gc = BARSLAST(gc_arr)
-        self._recent_gc = bars_since_gc <= self.p.gc_lookback
 
         # ---- 振幅 / 异动 ----
         is_tech = self.p.stock_type == "tech"
@@ -371,26 +348,22 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
         _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
         has_vol_expand = COUNT(vol_expand, _vep) >= _vem
-        # 缩量快速拉升：近期涨幅大但量能萎缩
         _ref_c = REF(C, _vep)
         _price_rise = np.where(np.abs(_ref_c) > 0.001,
                                (C - _ref_c) / np.abs(_ref_c) * 100, 0)
         _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
         no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
                                & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
-        # 连续涨停缩量排除：前期有连续涨停且缩量则直接剔除
         _lp = 1.20 if self.p.stock_type == "tech" else 1.10
         _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
         _limit_shrink = _limit_up & (V < REF(V, 1))
         _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
         no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
-        # 连续上涨后放量下跌排除：近N天下跌日总成交量 > 上涨日总成交量
         _rise_v = np.where(C > REF(C, 1), V, 0)
         _decline_v = np.where(C < REF(C, 1), V, 0)
         _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
         _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
         no_heavy_decline = ~(_dvs > _rvs)
-        # S1/大风车排除：加速上涨后出现放天量大阴线或历史天量长上下影阴线
         _s1p = HUANGBAI_S1_PERIOD
         _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
         _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
@@ -408,7 +381,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                                & no_s1_dafengche)
 
     # ------------------------------------------------------------------ #
-    #  next — 逐 bar 交易逻辑（V2: 增加大盘MACD过滤）                       #
+    #  next — 逐 bar 交易逻辑（V4: 无金叉条件）                           #
     # ------------------------------------------------------------------ #
     def next(self):
         if self.order:
@@ -425,24 +398,23 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         idx = len(self) - 1
         dt = self.data.datetime.date(0)
 
-        # V2新增：大盘MACD多头过滤
+        # 大盘MACD多头过滤
         market_macd_ok = self.p.skip_market_macd
         if not market_macd_ok and self._market_macd_bullish is not None:
             market_macd_ok = self._market_macd_bullish[idx]
 
         weekly_ok = self.p.skip_weekly or (self._weekly_bull[idx] and self._above_ma30w[idx])
-        gc_ok = self.p.skip_gc or self._recent_gc[idx]
         b1_ok = self._b1[idx]
         stock_macd_ok = self.p.skip_stock_macd or self._stock_macd_bullish[idx]
         vol_expand_ok = self.p.skip_vol_expand or self._vol_expand_ok[idx]
 
         if self.p.print_log:
-            self._print_filter_result(dt, weekly_ok, gc_ok, b1_ok, market_macd_ok,
+            self._print_filter_result(dt, weekly_ok, b1_ok, market_macd_ok,
                                       stock_macd_ok, vol_expand_ok)
 
         if not market_macd_ok:
             return
-        if not weekly_ok or not gc_ok or not b1_ok or not stock_macd_ok or not vol_expand_ok:
+        if not weekly_ok or not b1_ok or not stock_macd_ok or not vol_expand_ok:
             return
 
         if self._last_sl_bar is not None and (len(self) - self._last_sl_bar) < 10:
@@ -471,7 +443,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.log(f"买入  @ {self.data.close[0]:.2f}  止损={sl:.2f}")
 
     def _check_exit(self):
-        """出场逻辑（与V1完全相同）"""
+        """出场逻辑（与V2完全相同）"""
         idx = len(self) - 1
         price = self.data.close[0]
         high = self.data.high[0]
@@ -551,7 +523,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                         self._reset_position_state()
                         return
 
-        # 4. 半仓持股模式（仅涨停可卖1/2，中阳不再触发）
+        # 4. 半仓持股模式
         if self.hold_until_below_white:
             yellow_val = self._yellow[idx]
             wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 0
@@ -579,9 +551,8 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                     self.log(f"半仓跌破白线 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     self._reset_position_state()
                     return
-            # 未清仓：继续检查涨停卖1/2
 
-        # 5. 动量持股逻辑（连续止盈后持股待涨）
+        # 5. 动量持股逻辑
         limit_pct = 1.20 if self.p.stock_type == "tech" else 1.10
         prev_close = self.data.close[-1]
         limit_up_price = round(prev_close * limit_pct, 2)
@@ -595,7 +566,6 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         tp_met = hit_limit_up or hit_mid_yang
 
         if self._momentum_hold:
-            # 动量持股模式：检测退出条件
             if price < prev_close:
                 self._consecutive_down_days += 1
             else:
@@ -609,7 +579,6 @@ class HuangBaiB1V2Strategy(BaseStrategy):
                 self._reset_position_state()
             return
 
-        # 正常模式：累计连续止盈天数
         if tp_met:
             self._consecutive_tp_days += 1
         else:
@@ -617,28 +586,27 @@ class HuangBaiB1V2Strategy(BaseStrategy):
 
         if self._consecutive_tp_days >= 3:
             self._momentum_hold = True
-            return  # 第3天不卖，进入动量持股
+            return
 
-        # 6. 涨停卖1/2（半仓模式下仍可触发）
+        # 6. 涨停卖1/2
         if high >= limit_up_price:
             sell_size = max(1, int(self.position.size / 2))
             if sell_size < self.position.size:
                 self.order = self.sell(size=sell_size)
                 self._partial_sold = True
                 self.log(f"涨停卖半 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
-                # position.size 尚未更新（订单已提交未执行），用当前持仓-卖出量预测剩余
                 if self.position.size - sell_size <= self.initial_size / 2:
                     self.hold_until_below_white = True
             return
 
-        # 7. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
+        # 7. 中阳卖1/3
         if not self.hold_until_below_white and not self._mid_yang_triggered and daily_up:
             if pct_gain >= mid_yang:
                 sell_size = max(1, int(self.position.size / 3))
                 if sell_size < self.position.size:
                     self.order = self.sell(size=sell_size)
-                    self._partial_sold = True
                     self._mid_yang_triggered = True
+                    self._partial_sold = True
                     self.log(f"中阳卖1/3 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     if self.position.size - sell_size <= self.initial_size / 2:
                         self.hold_until_below_white = True
@@ -650,9 +618,9 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         self.hold_until_below_white = False
         self.initial_size = 0
         self._mid_yang_triggered = False
-        self._partial_sold = False
         self._profit_100pct = False
         self._profit_100pct_down_days = 0
+        self._partial_sold = False
         self._momentum_hold = False
         self._consecutive_tp_days = 0
         self._consecutive_down_days = 0
@@ -661,26 +629,25 @@ class HuangBaiB1V2Strategy(BaseStrategy):
         if self.p.print_log:
             dt = dt or self.data.datetime.date(0)
             sym = self.data._name or "?"
-            print(f"[{dt.isoformat()}] {sym}  [B1V2] {txt}")
+            print(f"[{dt.isoformat()}] {sym}  [B1V4] {txt}")
 
-    def _print_filter_result(self, dt, weekly_ok, gc_ok, b1_ok, market_macd_ok,
-                             stock_macd_ok, vol_expand_ok=True):
+    def _print_filter_result(self, dt, weekly_ok, b1_ok, market_macd_ok,
+                             stock_macd_ok, vol_expand_ok):
         sym = self.data._name or "?"
         idx = len(self) - 1
         w = "Y" if weekly_ok else "N"
-        g = "Y" if gc_ok else "N"
         b = "Y" if b1_ok else "N"
         m = "Y" if market_macd_ok else "N"
         s = "Y" if stock_macd_ok else "N"
         v = "Y" if vol_expand_ok else "N"
-        all_pass = (market_macd_ok and weekly_ok and gc_ok and b1_ok
+        all_pass = (market_macd_ok and weekly_ok and b1_ok
                     and stock_macd_ok and vol_expand_ok)
 
         if not b1_ok and not all_pass:
             return
 
         tag = " <<< SELECT" if all_pass else ""
-        print(f"[{dt.isoformat()}] {sym}  [B1V2] 大盘={m}  周线={w}  金叉={g}  "
+        print(f"[{dt.isoformat()}] {sym}  [B1V4] 大盘={m}  周线={w}  "
               f"放量={v}  个股MACD={s}  B1={b}  "
               f"C={self.data.close[0]:.2f}  "
               f"J={self.kdj._j[idx]:.1f}  RSI={self._rsi[idx]:.1f}"
@@ -694,7 +661,7 @@ class HuangBaiB1V2Strategy(BaseStrategy):
 
 
 # ================================================================== #
-#  全市场选股扫描 V2 — 增加大盘MACD过滤                               #
+#  全市场选股扫描 V4 — 无金叉条件                                      #
 # ================================================================== #
 
 def _get_all_codes(tdxdir=TDX_DIR):
@@ -717,7 +684,7 @@ def _get_all_codes(tdxdir=TDX_DIR):
 
 
 def _compute_signals(C, H, L, O, V, dates, params):
-    """计算最新 bar 的四级过滤结果（V2: 增加大盘MACD）"""
+    """计算最新 bar 的过滤结果（V4: 无金叉条件）"""
     n = len(C)
     if n < 300:
         return None
@@ -752,11 +719,6 @@ def _compute_signals(C, H, L, O, V, dates, params):
     weekly_ok = valid and ma30w[i] > ma60w[i] > ma120w[i] > ma240w[i]
     above_ma30w = C[i] > ma30w[i]
 
-    # 黄白线金叉
-    gc_arr = CROSS(white, yellow)
-    bars_gc = np.asarray(BARSLAST(gc_arr), dtype=float)
-    gc_ok = bars_gc[i] <= params["gc_lookback"]
-
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_ok = True
 
@@ -769,19 +731,16 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _vol_ratio = MA(V, _vep)[i] / max(MA(V, 60)[i], 1)
     no_shrinkage_surge = not (_price_rise > HUANGBAI_SURGE_PRICE_PCT
                               and _vol_ratio < HUANGBAI_SURGE_VOL_RATIO)
-    # 连续涨停缩量排除
     _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
     _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
     _limit_shrink = _limit_up & (V < REF(V, 1))
     _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
     no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep)[i] < 1
-    # 连续上涨后放量下跌排除
     _rise_v = np.where(C > REF(C, 1), V, 0)
     _decline_v = np.where(C < REF(C, 1), V, 0)
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values[i]
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values[i]
     no_heavy_decline = not (_dvs > _rvs)
-    # S1/大风车排除
     _s1p = HUANGBAI_S1_PERIOD
     _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
     _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
@@ -798,8 +757,8 @@ def _compute_signals(C, H, L, O, V, dates, params):
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
 
-    if not (weekly_ok and above_ma30w and gc_ok and stock_macd_ok and vol_expand_ok):
-        return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
+    if not (weekly_ok and above_ma30w and stock_macd_ok and vol_expand_ok):
+        return {"weekly": weekly_ok and above_ma30w, "gc": True,
                 "market_macd": True, "b1": False, "stock_macd": stock_macd_ok,
                 "vol_expand": vol_expand_ok,
                 "close": C[i], "J": J[i], "RSI": rsi[i],
@@ -925,7 +884,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
-# ---------- 多进程扫描 V2 ----------
+# ---------- 多进程扫描 V4 ----------
 
 _process_reader = None
 
@@ -937,8 +896,8 @@ def _init_process(tdxdir, market):
     preload_disk_cache()
 
 
-def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
-    """扫描单只股票（大盘MACD在调用方层面已判断，此处直接使用 market_macd_ok）"""
+def _scan_one(code, params, skip_weekly, market_macd_ok=True):
+    """扫描单只股票（V4: 无金叉条件）"""
     assert _process_reader is not None, "_process_reader 未初始化，请在子进程中调用"
     try:
         df = _process_reader.daily(symbol=code)
@@ -957,10 +916,9 @@ def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
         if sig is None:
             return code, None, False
         weekly_ok = skip_weekly or sig["weekly"]
-        gc_ok = skip_gc or sig["gc"]
         stock_macd_ok = sig.get("stock_macd", True)
         vol_expand_ok = sig.get("vol_expand", True)
-        if sig["b1"] and weekly_ok and gc_ok and stock_macd_ok and vol_expand_ok and market_macd_ok:
+        if sig["b1"] and weekly_ok and stock_macd_ok and vol_expand_ok and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -968,14 +926,10 @@ def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
         return code, {"error": str(e)}, True
 
 
-def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
+def scan_all(stock_type="main", skip_weekly=False,
              tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS,
              skip_on_bear=False):
-    """V2全市场扫描：增加大盘MACD过滤
-
-    Args:
-        skip_on_bear: 大盘空头时跳过扫描（节省时间），默认 False（仍扫描但不执行买入）
-    """
+    """V4全市场扫描：大盘MACD过滤，无金叉条件"""
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     # 检查大盘MACD状态
@@ -1003,7 +957,7 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
         "m1": HUANGBAI_M1, "m2": HUANGBAI_M2, "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
         "n": HUANGBAI_N, "m": HUANGBAI_M, "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
         "wma30": 30, "wma60": 60, "wma120": 120, "wma240": 240,
-        "gc_lookback": HUANGBAI_GC_LOOKBACK, "stock_type": stock_type,
+        "stock_type": stock_type,
     }
 
     results = []
@@ -1017,7 +971,7 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
         initargs=(tdxdir, market),
     ) as pool:
         futures = {
-            pool.submit(_scan_one, code, params, skip_weekly, skip_gc, market_macd_ok): code
+            pool.submit(_scan_one, code, params, skip_weekly, market_macd_ok): code
             for code in codes
         }
         for future in as_completed(futures):
@@ -1057,11 +1011,11 @@ def scan_all(stock_type="main", skip_weekly=False, skip_gc=False,
 
 
 # ================================================================== #
-#  组合级模拟 V2：增加大盘MACD每bar过滤                                #
+#  组合级模拟 V4：大盘MACD每bar过滤，无金叉条件                        #
 # ================================================================== #
 
 def _compute_all_bar_signals(C, H, L, O, V, dates, params):
-    """计算每根 bar 的信号数组（与V1相同，大盘MACD在模拟器层面过滤）"""
+    """计算每根 bar 的信号数组（V4: 无金叉条件）"""
     n = len(C)
     if n < 300:
         return None
@@ -1094,10 +1048,6 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     valid = (ma30w > 0.01) & (ma60w > 0.01) & (ma120w > 0.01) & (ma240w > 0.01)
     weekly_bull = valid & (ma30w > ma60w) & (ma60w > ma120w) & (ma120w > ma240w)
     above_ma30w = C > ma30w
-
-    gc_arr = CROSS(white, yellow)
-    bars_since_gc = BARSLAST(gc_arr)
-    recent_gc = np.asarray(bars_since_gc, dtype=float) <= params["gc_lookback"]
 
     is_tech = params["stock_type"] == "tech"
     pct_change = np.where(LC > 0, C / LC - 1, 0.0)
@@ -1253,19 +1203,16 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _vol_ratio = MA(V, _vep) / np.maximum(MA(V, 60), 1)
     no_shrinkage_surge = ~((_price_rise > HUANGBAI_SURGE_PRICE_PCT)
                            & (_vol_ratio < HUANGBAI_SURGE_VOL_RATIO))
-    # 连续涨停缩量排除
     _lp = 1.20 if params.get("stock_type") == "tech" else 1.10
     _limit_up = C >= np.round(REF(C, 1) * _lp, 2)
     _limit_shrink = _limit_up & (V < REF(V, 1))
     _consec_ls = _limit_shrink & (REF(_limit_shrink.astype(float), 1) > 0.5)
     no_consec_limit_shrink = COUNT(_consec_ls.astype(float), _vep) < 1
-    # 连续上涨后放量下跌排除：近N天下跌日总成交量 > 上涨日总成交量
     _rise_v = np.where(C > REF(C, 1), V, 0)
     _decline_v = np.where(C < REF(C, 1), V, 0)
     _rvs = pd.Series(_rise_v).rolling(_vep, min_periods=1).sum().values
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
     no_heavy_decline = ~(_dvs > _rvs)
-    # S1/大风车排除
     _s1p = HUANGBAI_S1_PERIOD
     _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
     _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
@@ -1295,7 +1242,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
-        "recent_gc": recent_gc,
+        "recent_gc": np.ones(len(C), dtype=bool),  # V4无金叉条件，始终为True
         "b1": b1,
         "shrink_score": shrink_score,
         "stock_macd_bullish": stock_macd_bullish,
@@ -1342,7 +1289,7 @@ def _scan_one_all_bars(code, params):
 def preload_all_signals(start="2024-01-01", end="2025-12-31",
                         stock_type="main", max_workers=SCAN_MAX_WORKERS,
                         tdxdir=TDX_DIR, market=TDX_MARKET):
-    """V2预加载：增加大盘MACD计算
+    """V4预加载：大盘MACD计算，无金叉条件
 
     Returns:
         (all_signals, trading_days, market_macd_bullish)
@@ -1357,7 +1304,7 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
         "m1": HUANGBAI_M1, "m2": HUANGBAI_M2, "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
         "n": HUANGBAI_N, "m": HUANGBAI_M, "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
         "wma30": 30, "wma60": 60, "wma120": 120, "wma240": 240,
-        "gc_lookback": HUANGBAI_GC_LOOKBACK, "stock_type": stock_type,
+        "stock_type": stock_type,
     }
 
     all_signals = {}
@@ -1408,7 +1355,7 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
         year_info = "  ".join(f"{y}年:{c}天" for y, c in years.items())
         print(f"  数据范围: {first.strftime('%Y-%m-%d')} ~ {last.strftime('%Y-%m-%d')}  [{year_info}]")
 
-    # V2新增：计算大盘MACD多头状态
+    # 计算大盘MACD多头状态
     market_macd_bullish = None
     if len(trading_days) > 0:
         print("  计算大盘MACD状态...")
