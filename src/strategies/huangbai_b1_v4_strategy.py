@@ -38,9 +38,10 @@ from config import (
     HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
     HUANGBAI_S1_PERIOD,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
+    DNZH_MIN_MARKET_CAP,
 )
 
-from src.strategies.dongneng_zhuan_strategy import _rolling_std, _rolling_sum
+from src.strategies.dongneng_zhuan_strategy import _rolling_std, _rolling_sum, _load_capital_data
 
 
 # ---------- helpers（复用 V2 逻辑） ----------
@@ -523,10 +524,13 @@ class HuangBaiB1V4Strategy(BaseStrategy):
 
         self.order = self.order_target_percent(target=self.p.position_pct)
 
-        if self.data.close[0] >= self._white[idx]:
-            sl = self.data.low[0]
+        wy_diff = (self._white[idx] - self._yellow[idx]) / self._yellow[idx]
+        if wy_diff < 0.05:
+            sl = self._yellow[idx] * 0.99
+        elif self.data.close[0] >= self._white[idx]:
+            sl = self.data.low[0] * 0.99
         else:
-            sl = self._yellow[idx]
+            sl = self._yellow[idx] * 0.99
 
         self.buy_info = {
             "price": self.data.close[0],
@@ -1113,7 +1117,7 @@ def scan_all(stock_type="main", skip_weekly=False,
 #  组合级模拟 V4：大盘MACD每bar过滤，无金叉条件                        #
 # ================================================================== #
 
-def _compute_all_bar_signals(C, H, L, O, V, dates, params):
+def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     """计算每根 bar 的信号数组（V4: 无金叉条件）"""
     n = len(C)
     if n < 300:
@@ -1147,6 +1151,14 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     valid = (ma30w > 0.01) & (ma60w > 0.01) & (ma120w > 0.01) & (ma240w > 0.01)
     weekly_bull = valid & (ma30w > ma60w) & (ma60w > ma120w) & (ma120w > ma240w)
     above_ma30w = C > ma30w
+
+    # 流通市值过滤：流通市值 > DNZH_MIN_MARKET_CAP 亿元
+    min_mc = params.get("min_market_cap", 0)
+    if capital_shares and capital_shares > 0 and min_mc > 0:
+        market_cap = capital_shares * C / 10000  # 万股×元/股/10000 = 亿元
+        liutong_mask = market_cap > min_mc
+    else:
+        liutong_mask = np.ones(n, dtype=bool)
 
     is_tech = params["stock_type"] == "tech"
     pct_change = np.where(LC > 0, C / LC - 1, 0.0)
@@ -1341,6 +1353,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
+        "liutong_mask": liutong_mask,
         "recent_gc": np.ones(len(C), dtype=bool),  # V4无金叉条件，始终为True
         "b1": b1,
         "shrink_score": shrink_score,
@@ -1369,13 +1382,14 @@ def _scan_one_all_bars(code, params):
         df = df.sort_index()
         from src.data.adjustment import apply_qfq
         df = apply_qfq(df, code)
+        capital_shares = params.get("_capital_data", {}).get(code)
         signals = _compute_all_bar_signals(
             df["close"].values.astype(float),
             df["high"].values.astype(float),
             df["low"].values.astype(float),
             df["open"].values.astype(float),
             df["volume"].values.astype(float),
-            df.index, params)
+            df.index, params, capital_shares)
         if signals is not None:
             amount = df["amount"].values.astype(float)
             signals["avg_amount_20"] = pd.Series(amount).rolling(
@@ -1399,11 +1413,20 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
     total = len(codes)
     print(f"预加载 {total} 只A股信号... (workers={max_workers or 'auto'})")
 
+    # 加载流通股本数据
+    capital_data = _load_capital_data(tdxdir)
+    if capital_data:
+        print(f"  已加载 {len(capital_data)} 只股票流通股本数据 (>{DNZH_MIN_MARKET_CAP}亿)")
+    else:
+        print("  警告: 无法加载流通股本数据，跳过流通市值过滤")
+
     params = {
         "m1": HUANGBAI_M1, "m2": HUANGBAI_M2, "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
         "n": HUANGBAI_N, "m": HUANGBAI_M, "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
         "wma30": 30, "wma60": 60, "wma120": 120, "wma240": 240,
         "stock_type": stock_type,
+        "min_market_cap": DNZH_MIN_MARKET_CAP,
+        "_capital_data": capital_data or {},
     }
 
     all_signals = {}

@@ -24,6 +24,7 @@ class Position:
         "partial_sold",
         "momentum_hold", "consecutive_tp_days", "consecutive_down_days",
         "profit_100pct", "profit_100pct_down_days",
+        "below_white_days",
         # V5 战法退出字段
         "key_k_high", "key_k_low", "key_k_bar",
         "white_break_pending", "white_break_bar",
@@ -51,6 +52,7 @@ class Position:
         self.consecutive_down_days = 0
         self.profit_100pct = False
         self.profit_100pct_down_days = 0
+        self.below_white_days = 0
         # V5 战法退出字段
         self.key_k_high = None
         self.key_k_low = None
@@ -264,7 +266,8 @@ class PortfolioSimulator:
                 b1_ok = sig["b1"][idx]
                 dongneng_ok = sig.get("dongneng_recent", sig.get("stock_macd_bullish", np.ones(idx + 1, dtype=bool)))[idx]
                 vol_expand_ok = sig.get("vol_expand_ok", np.ones(idx + 1, dtype=bool))[idx]
-                if gc_ok and b1_ok and dongneng_ok and vol_expand_ok:
+                liutong_ok = sig.get("liutong_mask", np.ones(idx + 1, dtype=bool))[idx]
+                if gc_ok and b1_ok and dongneng_ok and vol_expand_ok and liutong_ok:
                     score = sig["shrink_score"][idx]
                     if np.isnan(score):
                         score = 1.0
@@ -310,15 +313,13 @@ class PortfolioSimulator:
         white_val = sig["white"][idx]
         yellow_val = sig["yellow"][idx]
         low_val = sig["low"][idx]
-        if price >= white_val:
-            # 白线之上买入 → 买入日最低价止损
-            sl = low_val
-        elif price >= yellow_val:
-            # 白线和黄线之间 → 黄线价止损
-            sl = yellow_val
+        wy_diff = (white_val - yellow_val) / yellow_val
+        if wy_diff < 0.05:
+            sl = yellow_val * 0.99
+        elif price >= white_val:
+            sl = low_val * 0.99
         else:
-            # 黄线之下 → 买入日最低价止损
-            sl = low_val
+            sl = yellow_val * 0.99
 
         pos = Position(
             code=code, buy_date=date, buy_price=price,
@@ -434,6 +435,17 @@ class PortfolioSimulator:
             if total_pnl_pct >= 100:
                 pos.profit_100pct = True
                 continue
+
+            # 3.3 止盈放飞后连续2天跌破白线清仓
+            if pos.partial_sold:
+                if price < white_val:
+                    pos.below_white_days += 1
+                else:
+                    pos.below_white_days = 0
+                if pos.below_white_days >= 2:
+                    self._sell_position(code, pos, price, date, "止盈放飞后连跌破白线")
+                    to_remove.append(code)
+                    continue
 
             # 3.5 部分卖出后白线/黄线跟踪止损
             if pos.partial_sold and not pos.hold_until_below_white:

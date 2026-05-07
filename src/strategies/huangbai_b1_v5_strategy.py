@@ -3,12 +3,13 @@
 买入逻辑基于 V2（周线多头 + 大盘MACD + B1七子条件 + 放量过滤），移除金叉条件
 
 退出逻辑基于文章战法，六级优先级：
+L0. 如果没有盈利之前则优先L1条件止损,有止盈放飞操作后再考虑L2-L6
 L1. 硬止损（止损价，无条件）
 L2. 放量跌停（量能放大 + 跌停价）
 L3. S1信号持有期卖出（加速后放量阴线，缩量+关键K例外）
 L4. 两根平行中阴线（局部高位连续两根中阴）
 L5. 参考线次日确认（跌破参考线后次日未收回，缩量+关键K例外）
-    - 参考线选择：白黄线差值≤10% → 黄线；止损基于黄线+1% → 黄线；否则 → 白线+1%
+    - 参考线选择：白黄线差值≤10% → 黄线；止损基于黄线下 -1% → 黄线；否则 → 白线下 -1%
 L6. 放飞减仓1/3（涨停或大涨减仓，保留核心仓位）
 
 核心概念：
@@ -523,79 +524,81 @@ class HuangBaiB1V5Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
-        # ---- L2: 放量跌停 ----
-        limit_down_price = round(prev_close * (2 - limit_pct), 2)
-        vol_expanding = V[idx] > ma_v20[idx] * 1.5
-        if vol_expanding and price <= limit_down_price:
-            self.order = self.order_target_percent(target=0.0)
-            self._last_sl_bar = len(self)
-            self.log(f"放量跌停 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
-            self._reset_position_state()
-            return
-
-        # ---- L3: S1信号持有期卖出 ----
-        if self.has_accelerated:
-            hhv_v20 = HHV(V, 20)
-            ma_v60 = MA(V, 60)
-            big_vol = (V[idx] > hhv_v20[idx] * 2) or (V[idx] > ma_v60[idx] * 3)
-            bearish = price < open_price
-            body_pct = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
-            if big_vol and bearish and body_pct > 3:
-                if not (is_shrinking and in_key_k):
-                    self.order = self.order_target_percent(target=0.0)
-                    self._last_sl_bar = len(self)
-                    self.log(f"S1信号清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
-                    self._reset_position_state()
-                    return
-
-        # ---- L4: 两根平行中阴线 ----
-        if idx >= 2:
-            c1, o1 = C[idx - 1], O[idx - 1]
-            bearish0 = price < open_price
-            bearish1 = c1 < o1
-            body0 = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
-            body1 = abs(o1 - c1) / o1 * 100 if o1 > 0 else 0
-            hhv_h20 = HHV(H, 20)
-            at_local_high = price >= hhv_h20[idx] * 0.97
-            if bearish0 and bearish1 and body0 > 2.5 and body1 > 2.5 and at_local_high:
+        # ---- L0: 未放飞前仅L1+L6，放飞后L2-L5生效 ----
+        if self._partial_sold:
+            # ---- L2: 放量跌停 ----
+            limit_down_price = round(prev_close * (2 - limit_pct), 2)
+            vol_expanding = V[idx] > ma_v20[idx] * 1.5
+            if vol_expanding and price <= limit_down_price:
                 self.order = self.order_target_percent(target=0.0)
                 self._last_sl_bar = len(self)
-                self.log(f"两根中阴线清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                self.log(f"放量跌停 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                 self._reset_position_state()
                 return
 
-        # ---- L5: 参考线次日确认 ----
-        wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 100
-        if wy_gap_pct <= 10:
-            l5_ref = yellow_val
-            l5_name = "黄线"
-        elif self._sl_based_on_yellow:
-            l5_ref = yellow_val * 1.01
-            l5_name = "黄线+1%"
-        else:
-            l5_ref = white_val * 1.01
-            l5_name = "白线+1%"
+            # ---- L3: S1信号持有期卖出 ----
+            if self.has_accelerated:
+                hhv_v20 = HHV(V, 20)
+                ma_v60 = MA(V, 60)
+                big_vol = (V[idx] > hhv_v20[idx] * 2) or (V[idx] > ma_v60[idx] * 3)
+                bearish = price < open_price
+                body_pct = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
+                if big_vol and bearish and body_pct > 3:
+                    if not (is_shrinking and in_key_k):
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        self.log(f"S1信号清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
 
-        if self.white_break_pending:
-            if price < l5_ref:
-                # 例外1: 缩量 + 在关键K内 → 不卖
-                if is_shrinking and in_key_k:
-                    self.white_break_pending = False
-                # 例外2: 未加速 + 缩量 → 不卖
-                elif not self.has_accelerated and is_shrinking:
-                    self.white_break_pending = False
-                else:
+            # ---- L4: 两根平行中阴线 ----
+            if idx >= 2:
+                c1, o1 = C[idx - 1], O[idx - 1]
+                bearish0 = price < open_price
+                bearish1 = c1 < o1
+                body0 = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
+                body1 = abs(o1 - c1) / o1 * 100 if o1 > 0 else 0
+                hhv_h20 = HHV(H, 20)
+                at_local_high = price >= hhv_h20[idx] * 0.97
+                if bearish0 and bearish1 and body0 > 2.5 and body1 > 2.5 and at_local_high:
                     self.order = self.order_target_percent(target=0.0)
                     self._last_sl_bar = len(self)
-                    self.log(f"{l5_name}确认清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                    self.log(f"两根中阴线清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
                     self._reset_position_state()
                     return
+
+            # ---- L5: 参考线次日确认 ----
+            wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 100
+            if wy_gap_pct <= 10:
+                l5_ref = yellow_val
+                l5_name = "黄线"
+            elif self._sl_based_on_yellow:
+                l5_ref = yellow_val * 0.99
+                l5_name = "黄线-1%"
             else:
-                self.white_break_pending = False
-        else:
-            if price < l5_ref:
-                self.white_break_pending = True
-                self.white_break_bar = idx
+                l5_ref = white_val * 0.99
+                l5_name = "白线-1%"
+
+            if self.white_break_pending:
+                if price < l5_ref:
+                    # 例外1: 缩量 + 在关键K内 → 不卖
+                    if is_shrinking and in_key_k:
+                        self.white_break_pending = False
+                    # 例外2: 未加速 + 缩量 → 不卖
+                    elif not self.has_accelerated and is_shrinking:
+                        self.white_break_pending = False
+                    else:
+                        self.order = self.order_target_percent(target=0.0)
+                        self._last_sl_bar = len(self)
+                        self.log(f"{l5_name}确认清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+                        self._reset_position_state()
+                        return
+                else:
+                    self.white_break_pending = False
+            else:
+                if price < l5_ref:
+                    self.white_break_pending = True
+                    self.white_break_bar = idx
 
         # ---- L6: 放飞减仓 ----
         limit_up_price = round(prev_close * limit_pct, 2)
