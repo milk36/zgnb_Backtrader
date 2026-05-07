@@ -40,6 +40,7 @@ from src.strategies.huangbai_b1_strategy import HuangBaiB1Strategy, scan_all
 from src.strategies.huangbai_b1_v2_strategy import HuangBaiB1V2Strategy, scan_all as scan_all_v2
 from src.strategies.huangbai_b1_v3_strategy import HuangBaiB1V3Strategy, scan_all as scan_all_v3
 from src.strategies.huangbai_b1_v4_strategy import HuangBaiB1V4Strategy, scan_all as scan_all_v4
+from src.strategies.huangbai_b1_v5_strategy import HuangBaiB1V5Strategy, scan_all as scan_all_v5
 from src.strategies.dongneng_zhuan_strategy import scan_all as scan_all_dnzh
 
 STRATEGIES = {
@@ -48,6 +49,7 @@ STRATEGIES = {
     "huangbai_v2": HuangBaiB1V2Strategy,
     "huangbai_v3": HuangBaiB1V3Strategy,
     "huangbai_v4": HuangBaiB1V4Strategy,
+    "huangbai_v5": HuangBaiB1V5Strategy,
     "dongneng_zhuan": None,  # 仅支持组合级模拟，不支持单股回测
 }
 
@@ -367,6 +369,53 @@ def main():
             generate_charts(report["trade_list"], sim._all_signals)
         return
 
+    # ---- huangbai_v5 组合级模拟 ----
+    if strategy_cls == HuangBaiB1V5Strategy and args.portfolio:
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.huangbai_b1_v5_strategy import preload_all_signals as preload_v5
+
+        print("=" * 55)
+        print("  V5: 周线多头 + 大盘MACD + 黄白线金叉 + B1 + 战法退出")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days, market_macd_bullish = preload_v5(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: V5组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
+              f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
+              f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PORTFOLIO_INITIAL_CASH,
+            max_positions=PORTFOLIO_MAX_POSITIONS,
+            per_position_cash=PORTFOLIO_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[B1V5]")
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V5]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals)
+        return
+
     # ---- huangbai 策略：全市场扫描 + 回测 ----
     if strategy_cls == HuangBaiB1Strategy and (args.scan or args.symbol is None):
         print("=" * 55)
@@ -455,6 +504,28 @@ def main():
         _run_backtest(codes, args)
         return
 
+    # ---- huangbai_v5 全市场扫描 + 回测 ----
+    if strategy_cls == HuangBaiB1V5Strategy and (args.scan or args.symbol is None):
+        print("=" * 55)
+        print("  V5: 全市场选股扫描（战法退出逻辑）")
+        print("=" * 55)
+        results, market_macd_ok = scan_all_v5(stock_type=args.stock_type)
+
+        if args.scan_only:
+            return
+
+        if not results or not market_macd_ok:
+            print("\n无符合条件的股票或大盘MACD空头，回测终止。")
+            return
+
+        codes = [r["code"] for r in results]
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: 对 {len(codes)} 只选股结果执行回测")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"{'=' * 55}")
+        _run_backtest(codes, args)
+        return
+
     # ---- 指定股票回测 ----
     symbols = args.symbol or DEFAULT_STOCKS
     feed_provider = TdxDataFeed()
@@ -490,6 +561,17 @@ def main():
             print(f"  警告: 加载大盘指数数据失败({e})，大盘MACD过滤将被跳过")
         backtester.add_strategy(strategy_cls, stock_type=args.stock_type)
     elif strategy_cls == HuangBaiB1V4Strategy:
+        try:
+            market_feed = feed_provider.get_feed(
+                MARKET_INDEX_CODE, start=args.start, end=args.end)
+            if market_feed is not None:
+                backtester.add_feed(market_feed, name=MARKET_INDEX_CODE)
+            else:
+                print(f"  警告: 无法加载大盘指数({MARKET_INDEX_CODE})数据，大盘MACD过滤将被跳过")
+        except Exception as e:
+            print(f"  警告: 加载大盘指数数据失败({e})，大盘MACD过滤将被跳过")
+        backtester.add_strategy(strategy_cls, stock_type=args.stock_type)
+    elif strategy_cls == HuangBaiB1V5Strategy:
         try:
             market_feed = feed_provider.get_feed(
                 MARKET_INDEX_CODE, start=args.start, end=args.end)
