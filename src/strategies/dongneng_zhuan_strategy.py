@@ -492,15 +492,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     chip_dense = _conc_low60 & _price_near_center
 
     # ============================================================ #
-    #  最终信号：动能先筛 → 金砖再筛 → 筹码密集（串行过滤）           #
+    #  最终信号：近5日动能先筛 → 金砖再筛 → 筹码密集（串行过滤）      #
     # ============================================================ #
-    final_ok = dongneng_ok & jinzhuan_ok & chip_dense
+    dongneng_recent = EXIST(dongneng_ok, 5)
+    final_ok = dongneng_recent & jinzhuan_ok & chip_dense
 
     # 排名分数：金砖排名"下大上小"
     rank_score = np.where(final_ok, brick / np.maximum(pct_chg, 0.01), 0.0)
 
     return {
         "dongneng_ok": dongneng_ok,
+        "dongneng_recent": dongneng_recent,
         "jinzhuan_ok": jinzhuan_ok,
         "any_ok": final_ok,
         "rank_score": rank_score,

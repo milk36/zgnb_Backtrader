@@ -64,9 +64,14 @@ __slots__ = ("code", "buy_date", "buy_price", "buy_low", "stop_loss",
 
 - `src/data/minute_feed.py` 提供5分钟K线数据，基于 mootdx Reader
 - 懒加载 + 日级缓存（`(code, date_str)` 为key）
-- 每日结束调用 `clear_cache()` 释放内存
+- **分钟线自动前复权**：`_load()` 中对 OHLC 四列乘以复权比例，volume 不调整
+- 复权比例通过 `_get_qfq_ratio()` 计算：`ratio = qfq_close[date] / raw_daily_close[date]`
+- 同一交易日内所有分钟bar共享相同比例；比例接近1.0时跳过浮点运算
+- 原始日线收盘价按股票缓存（`_daily_close_cache`），每只只加载一次
+- 每日结束调用 `clear_cache()` 释放分钟数据缓存（日线收盘缓存不在此方法中清除）
 - 无数据时返回 None，模拟器自动降级为日线逻辑
 - `minute_entry_enabled` / `minute_exit_enabled` 可独立开关
+- 前复权确保分钟线价格与日线前复权价格体系一致，避免确认条件误判
 
 ### 仓位管理
 
