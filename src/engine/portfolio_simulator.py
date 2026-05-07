@@ -24,7 +24,6 @@ class Position:
         "partial_sold",
         "momentum_hold", "consecutive_tp_days", "consecutive_down_days",
         "profit_100pct", "profit_100pct_down_days",
-        "below_white_days",
         # V5 战法退出字段
         "key_k_high", "key_k_low", "key_k_bar",
         "white_break_pending", "white_break_bar",
@@ -52,7 +51,6 @@ class Position:
         self.consecutive_down_days = 0
         self.profit_100pct = False
         self.profit_100pct_down_days = 0
-        self.below_white_days = 0
         # V5 战法退出字段
         self.key_k_high = None
         self.key_k_low = None
@@ -436,16 +434,22 @@ class PortfolioSimulator:
                 pos.profit_100pct = True
                 continue
 
-            # 3.3 止盈放飞后连续2天跌破白线清仓
+            # 3.3 止盈放飞后：白线之上坚决持有，仅放量阴线+加速时卖出
             if pos.partial_sold:
-                if price < white_val:
-                    pos.below_white_days += 1
-                else:
-                    pos.below_white_days = 0
-                if pos.below_white_days >= 2:
-                    self._sell_position(code, pos, price, date, "止盈放飞后连跌破白线")
-                    to_remove.append(code)
-                    continue
+                # 白线之上：仅放量阴线+加速时卖出
+                if price >= white_val and idx >= 5:
+                    open_price = sig["open"][idx]
+                    vol = sig["volume"][idx]
+                    is_bearish = price < open_price
+                    vol_ma20 = np.mean(sig["volume"][max(0, idx - 20):idx])
+                    is_big_vol = vol > vol_ma20 * 1.5 if vol_ma20 > 0 else False
+                    recent_gain = (sig["close"][idx] - sig["close"][idx - 5]) / sig["close"][idx - 5] * 100
+                    has_accel = recent_gain > 15
+                    if is_bearish and is_big_vol and has_accel:
+                        self._sell_position(code, pos, price, date, "止盈放飞后放量阴线清仓")
+                        to_remove.append(code)
+                        continue
+                continue  # 不满足卖出条件，跳过后续所有卖出
 
             # 3.5 部分卖出后白线/黄线跟踪止损
             if pos.partial_sold and not pos.hold_until_below_white:
