@@ -9,7 +9,7 @@
 - [策略层：黄白线金叉后B1策略](feature/strategy-huangbai-b1.md): HuangBaiB1Strategy 的完整设计——周线多头过滤、黄白线金叉检测、7种B1买入子条件、分层止盈止损与分批卖出逻辑。同时包含全市场选股扫描函数和组合级预加载函数（preload_all_signals）。理解该策略、开发类似复杂策略或涉及 --portfolio/--scan 模式时参考。
 - [策略层：黄白线金叉后B1策略 V2](feature/strategy-huangbai-b1-v2.md): V1 的增强版本，新增大盘（上证指数）MACD 多头/空头过滤，空头时只卖不买。包含 V2 策略类、大盘 MACD 计算函数、扫描与预加载函数的变更说明，以及 PortfolioSimulator 适配逻辑。
 - [策略层：黄白线金叉后B1策略 V3](feature/strategy-huangbai-b1-v3.md): B1 买入信号替换为通达信原始选股公式（单一复合条件取代7子条件），止盈止损逻辑与V1/V2完全相同。B1通过共享函数统一三处调用，消除手动同步问题。
-- [策略层：黄白线B1策略 V4](feature/strategy-huangbai-b1-v4.md): V2 的变体版本，移除黄白线金叉条件放宽选股范围。保留大盘MACD过滤、周线多头、B1七子条件、vol_expand_ok过滤链和动量持股逻辑。`recent_gc` 返回全True数组以兼容 PortfolioSimulator。
+- [策略层：黄白线B1策略 V4](feature/strategy-huangbai-b1-v4.md): V2 的变体版本，移除黄白线金叉条件，新增60日动能信号过滤（综合天命打分+阵营过滤+硬性过滤，复用动能砖策略核心逻辑，不含流通市值过滤）。保留大盘MACD过滤、周线多头、B1七子条件、vol_expand_ok过滤链和动量持股逻辑。`recent_gc` 返回全True数组以兼容 PortfolioSimulator。
 - [策略层：黄白线B1策略 V5（战法退出逻辑）](feature/strategy-huangbai-b1-v5.md): 买入逻辑与 V2 完全相同，退出逻辑全部重写为文章战法的六级退出体系（硬止损→放量跌停→S1信号→两根中阴线→白线次日确认→放飞减仓）。引入关键K支撑、缩量不卖保护、加速检测等新概念，移除T+N、盈利100%清仓、动量持股、半仓持股等V2出场机制。PortfolioSimulator 新增 `_check_exits_v5` 专用退出路径。
 - [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装（单股回测）；PortfolioSimulator 组合级日频模拟引擎（100万/10只/每只10万）。理解回测执行流程时参考。
 - [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。

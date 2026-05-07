@@ -7,7 +7,7 @@
 0. 选股范围：沪深A股
 1. 周线多头空间
 2. 大盘MACD处于多头区间
-3. 个股MACD处于多头空间（预留）
+3. 60日内有动能信号（综合天命打分+阵营过滤+硬性过滤）
 4. B1买入信号（7个子条件OR）
 5. vol_expand_ok过滤链
 6. 止损/止盈/动量持股逻辑同V2
@@ -40,6 +40,8 @@ from config import (
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 
+from src.strategies.dongneng_zhuan_strategy import _rolling_std, _rolling_sum
+
 
 # ---------- helpers（复用 V2 逻辑） ----------
 
@@ -64,6 +66,103 @@ def _weekly_ma(daily_close, dates, period):
     weekly = s.resample('W-FRI').last().dropna()
     wma = weekly.rolling(period).mean()
     return wma.reindex(s.index, method='ffill').values
+
+
+def _compute_dongneng_ok(C, H, L, O, V):
+    """计算动能信号（综合天命打分 + 阵营过滤 + 硬性过滤）
+
+    复用 dongneng_zhuan_strategy 的核心逻辑，不含流通市值过滤。
+    Returns: dongneng_ok 布尔数组
+    """
+    REFC = REF(C, 1)
+    REFV = REF(V, 1)
+    pct_chg = np.where(REFC > 0, (C - REFC) / REFC * 100, 0.0)
+    is_yang = (C > O) & (C > REFC)
+
+    max_oc = np.maximum(O, C)
+    min_oc = np.minimum(O, C)
+    day_range = np.maximum(H - L, 0.001)
+    up_shadow = (H - max_oc) / day_range
+    dn_shadow = (min_oc - L) / day_range
+
+    # RSI(3)
+    diff_rsi = C - REFC
+    sma1 = SMA(np.maximum(diff_rsi, 0), 3, 1)
+    sma2 = SMA(np.abs(diff_rsi), 3, 1)
+    rsi3 = sma1 / np.maximum(sma2, 0.001) * 100
+
+    # KDJ(9,3,3)
+    llv9 = LLV(L, 9)
+    hhv9 = HHV(H, 9)
+    denom9 = hhv9 - llv9
+    rsv = np.where(denom9 != 0, (C - llv9) / denom9 * 100, 50.0)
+    K_val = SMA(rsv, 3, 1)
+    D_val = SMA(K_val, 3, 1)
+    J_val = 3 * K_val - 2 * D_val
+
+    # 动量增量
+    N1 = J_val - REF(J_val, 1)
+    N2 = rsi3 - REF(rsi3, 1)
+    vol_ratio = V / np.maximum(REFV, 1)
+
+    # 影线系数
+    shadow_ratio_dn = (H - C) / np.maximum(H - np.minimum(O, REFC), 0.001)
+    shadow_coef = np.where(is_yang, (0.70 - shadow_ratio_dn) * 1.3, 1.0)
+
+    # 量价加成
+    vb_raw = 1.0 + (1.2 - 1.0) / (6.0 - 2.5) * (vol_ratio - 2.5)
+    vol_bonus = np.where(
+        is_yang & (vol_ratio >= 2.5),
+        np.where(vol_ratio >= 6.0, 1.2, vb_raw),
+        1.0)
+
+    # 基础动量
+    base_mom = (N1 + N2) / 2 * shadow_coef * vol_bonus
+
+    # X 动量
+    x_diff = (N1 + N2) - (REF(N1, 1) + REF(N2, 1))
+    x_mom = np.where(is_yang & (x_diff > 0),
+                     x_diff / 2 * shadow_coef * vol_bonus, 0)
+
+    # Z-Score (45日)
+    ret_mean = MA(pct_chg, 45)
+    ret_std = _rolling_std(pct_chg, 45)
+    ret_z = np.where(ret_std > 0, (pct_chg - ret_mean) / ret_std, 0)
+
+    # 套牢筹码流量 (20日)
+    vol_mean = MA(V, 45)
+    top_prox = (H - LLV(L, 20)) / np.maximum(HHV(H, 20) - LLV(L, 20), 0.001)
+    is_true_green = (O > C) & (C < REFC)
+    is_fake_green = (O > C) & (C >= REFC)
+    flow1 = np.where(is_true_green,
+                     top_prox * (V / np.maximum(vol_mean, 1)) * np.maximum(0, -ret_z), 0)
+    flow2 = np.where(is_fake_green,
+                     top_prox * (V / np.maximum(vol_mean, 1))
+                     * ((O - C) / np.maximum(REFC, 0.001) * 100) * 0.5, 0)
+    overhead_v20 = REF(_rolling_sum(flow1 + flow2, 20), 1)
+
+    # 综合天命打分
+    norm_j = np.clip((REF(J_val, 1) - 19.0) / 11.0, 0, 1)
+    norm_rsi = np.clip((REF(rsi3, 1) - 29.0) / 11.0, 0, 1)
+    norm_retz = np.clip((ret_z - 2.5) / 0.7, 0, 1)
+    norm_v20 = np.clip((overhead_v20 - 2.0) / 8.0, 0, 1)
+    norm_bonus = np.clip((vol_ratio - 5.0) / 5.0, 0, 1)
+
+    visual_score = (base_mom + 15 * norm_bonus
+                    - (20 * norm_j + 30 * norm_rsi + 35 * norm_v20 + 10 * norm_retz)
+                    + 10)
+
+    # 阵营过滤
+    mask_a = (visual_score >= 35) & (base_mom >= 25)
+    mask_b = (visual_score >= 20) & (visual_score < 35) & (base_mom >= 45)
+    mask_c = (visual_score < 20) & (base_mom >= 65)
+    mask_d = (x_mom >= 45) & (base_mom <= 20)
+
+    # 硬性过滤
+    hard_mask = ((up_shadow < 0.30) & (dn_shadow < 0.35)
+                 & (pct_chg >= 3.0) & (ret_z >= 0.8))
+
+    return is_yang & hard_mask & (mask_a | mask_b | mask_c | mask_d)
 
 
 # ---------- 大盘MACD（与V2完全相同） ----------
@@ -341,8 +440,9 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-        # 个股MACD多头过滤（暂未启用，预留接口）
-        self._stock_macd_bullish = np.ones(len(C), dtype=bool)
+        # 动能信号过滤：60日内有动能信号
+        dongneng_ok = _compute_dongneng_ok(C, H, L, O, V)
+        self._dongneng_recent = EXIST(dongneng_ok, 60)
 
         # 前期放量上涨过滤：必须有放量支撑，排除缩量快速拉升
         vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
@@ -404,16 +504,16 @@ class HuangBaiB1V4Strategy(BaseStrategy):
 
         weekly_ok = self.p.skip_weekly or (self._weekly_bull[idx] and self._above_ma30w[idx])
         b1_ok = self._b1[idx]
-        stock_macd_ok = self.p.skip_stock_macd or self._stock_macd_bullish[idx]
+        dongneng_recent = self._dongneng_recent[idx]
         vol_expand_ok = self.p.skip_vol_expand or self._vol_expand_ok[idx]
 
         if self.p.print_log:
             self._print_filter_result(dt, weekly_ok, b1_ok, market_macd_ok,
-                                      stock_macd_ok, vol_expand_ok)
+                                      dongneng_recent, vol_expand_ok)
 
         if not market_macd_ok:
             return
-        if not weekly_ok or not b1_ok or not stock_macd_ok or not vol_expand_ok:
+        if not weekly_ok or not b1_ok or not dongneng_recent or not vol_expand_ok:
             return
 
         if self._last_sl_bar is not None and (len(self) - self._last_sl_bar) < 10:
@@ -631,23 +731,23 @@ class HuangBaiB1V4Strategy(BaseStrategy):
             print(f"[{dt.isoformat()}] {sym}  [B1V4] {txt}")
 
     def _print_filter_result(self, dt, weekly_ok, b1_ok, market_macd_ok,
-                             stock_macd_ok, vol_expand_ok):
+                             dongneng_recent, vol_expand_ok):
         sym = self.data._name or "?"
         idx = len(self) - 1
         w = "Y" if weekly_ok else "N"
         b = "Y" if b1_ok else "N"
         m = "Y" if market_macd_ok else "N"
-        s = "Y" if stock_macd_ok else "N"
+        d = "Y" if dongneng_recent else "N"
         v = "Y" if vol_expand_ok else "N"
         all_pass = (market_macd_ok and weekly_ok and b1_ok
-                    and stock_macd_ok and vol_expand_ok)
+                    and dongneng_recent and vol_expand_ok)
 
         if not b1_ok and not all_pass:
             return
 
         tag = " <<< SELECT" if all_pass else ""
         print(f"[{dt.isoformat()}] {sym}  [B1V4] 大盘={m}  周线={w}  "
-              f"放量={v}  个股MACD={s}  B1={b}  "
+              f"动能={d}  放量={v}  B1={b}  "
               f"C={self.data.close[0]:.2f}  "
               f"J={self.kdj._j[idx]:.1f}  RSI={self._rsi[idx]:.1f}"
               f"{tag}")
@@ -718,8 +818,9 @@ def _compute_signals(C, H, L, O, V, dates, params):
     weekly_ok = valid and ma30w[i] > ma60w[i] > ma120w[i] > ma240w[i]
     above_ma30w = C[i] > ma30w[i]
 
-    # 个股MACD多头过滤（暂未启用，预留接口）
-    stock_macd_ok = True
+    # 动能信号过滤：60日内有动能信号
+    dongneng_ok = _compute_dongneng_ok(C, H, L, O, V)
+    dongneng_recent = EXIST(dongneng_ok, 60)[i]
 
     # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
@@ -755,9 +856,9 @@ def _compute_signals(C, H, L, O, V, dates, params):
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
 
-    if not (weekly_ok and above_ma30w and stock_macd_ok and vol_expand_ok):
+    if not (weekly_ok and above_ma30w and dongneng_recent and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": True,
-                "market_macd": True, "b1": False, "stock_macd": stock_macd_ok,
+                "market_macd": True, "b1": False, "dongneng_recent": dongneng_recent,
                 "vol_expand": vol_expand_ok,
                 "close": C[i], "J": J[i], "RSI": rsi[i],
                 "shrink_score": 0}
@@ -878,7 +979,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
         b1 = True
 
     return {"weekly": True, "gc": True, "market_macd": True, "b1": b1,
-            "stock_macd": stock_macd_ok, "vol_expand": vol_expand_ok,
+            "dongneng_recent": dongneng_recent, "vol_expand": vol_expand_ok,
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
@@ -914,9 +1015,9 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
         if sig is None:
             return code, None, False
         weekly_ok = skip_weekly or sig["weekly"]
-        stock_macd_ok = sig.get("stock_macd", True)
+        dongneng_recent = sig.get("dongneng_recent", True)
         vol_expand_ok = sig.get("vol_expand", True)
-        if sig["b1"] and weekly_ok and stock_macd_ok and vol_expand_ok and market_macd_ok:
+        if sig["b1"] and weekly_ok and dongneng_recent and vol_expand_ok and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -1188,8 +1289,9 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-    # 个股MACD多头过滤（暂未启用，预留接口）
-    stock_macd_bullish = np.ones(len(C), dtype=bool)
+    # 动能信号过滤：60日内有动能信号
+    dongneng_ok_arr = _compute_dongneng_ok(C, H, L, O, V)
+    dongneng_recent = EXIST(dongneng_ok_arr, 60)
 
     # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除 + 放量下跌排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
@@ -1242,7 +1344,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "recent_gc": np.ones(len(C), dtype=bool),  # V4无金叉条件，始终为True
         "b1": b1,
         "shrink_score": shrink_score,
-        "stock_macd_bullish": stock_macd_bullish,
+        "dongneng_recent": dongneng_recent,
         "vol_expand_ok": vol_expand_ok,
         "chip_dense": chip_dense,
         "chip_spread": _chip_spread,

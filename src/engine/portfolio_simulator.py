@@ -262,9 +262,9 @@ class PortfolioSimulator:
             try:
                 gc_ok = sig["recent_gc"][idx]
                 b1_ok = sig["b1"][idx]
-                stock_macd_ok = sig.get("stock_macd_bullish", np.ones(idx + 1, dtype=bool))[idx]
+                dongneng_ok = sig.get("dongneng_recent", sig.get("stock_macd_bullish", np.ones(idx + 1, dtype=bool)))[idx]
                 vol_expand_ok = sig.get("vol_expand_ok", np.ones(idx + 1, dtype=bool))[idx]
-                if gc_ok and b1_ok and stock_macd_ok and vol_expand_ok:
+                if gc_ok and b1_ok and dongneng_ok and vol_expand_ok:
                     score = sig["shrink_score"][idx]
                     if np.isnan(score):
                         score = 1.0
@@ -716,78 +716,80 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # ---- L2: 放量跌停 ----
-            limit_down_price = round(prev_close * (2 - limit_pct), 2)
-            vol_expanding = ma_v20 is not None and volume > ma_v20[idx] * 1.5
-            if vol_expanding and price <= limit_down_price:
-                if cur_td_idx is not None:
-                    self._cooldown[code] = cur_td_idx
-                self._sell_position(code, pos, price, date, "放量跌停")
-                to_remove.append(code)
-                continue
+            # ---- L0: 未放飞前仅L1+L6，放飞后L2-L5生效 ----
+            if pos.partial_sold:
+                # ---- L2: 放量跌停 ----
+                limit_down_price = round(prev_close * (2 - limit_pct), 2)
+                vol_expanding = ma_v20 is not None and volume > ma_v20[idx] * 1.5
+                if vol_expanding and price <= limit_down_price:
+                    if cur_td_idx is not None:
+                        self._cooldown[code] = cur_td_idx
+                    self._sell_position(code, pos, price, date, "放量跌停")
+                    to_remove.append(code)
+                    continue
 
-            # ---- L3: S1信号持有期卖出 ----
-            if pos.has_accelerated:
-                big_vol = False
-                if hhv_v20 is not None and ma_v60 is not None:
-                    big_vol = (volume > hhv_v20[idx] * 2) or (volume > ma_v60[idx] * 3)
-                bearish = price < open_price
-                body_pct = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
-                if big_vol and bearish and body_pct > 3:
-                    if not (is_shrinking and in_key_k):
-                        if cur_td_idx is not None:
-                            self._cooldown[code] = cur_td_idx
-                        self._sell_position(code, pos, price, date, "S1信号清仓")
-                        to_remove.append(code)
-                        continue
+                # ---- L3: S1信号持有期卖出 ----
+                if pos.has_accelerated:
+                    big_vol = False
+                    if hhv_v20 is not None and ma_v60 is not None:
+                        big_vol = (volume > hhv_v20[idx] * 2) or (volume > ma_v60[idx] * 3)
+                    bearish = price < open_price
+                    body_pct = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
+                    if big_vol and bearish and body_pct > 3:
+                        if not (is_shrinking and in_key_k):
+                            if cur_td_idx is not None:
+                                self._cooldown[code] = cur_td_idx
+                            self._sell_position(code, pos, price, date, "S1信号清仓")
+                            to_remove.append(code)
+                            continue
 
-            # ---- L4: 两根平行中阴线 ----
-            C = sig["close"]
-            O = sig["open"]
-            c1, o1 = C[idx - 1], O[idx - 1]
-            bearish0 = price < open_price
-            bearish1 = c1 < o1
-            body0 = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
-            body1 = abs(o1 - c1) / o1 * 100 if o1 > 0 else 0
-            at_local_high = hhv_h20 is not None and price >= hhv_h20[idx] * 0.97
-            if bearish0 and bearish1 and body0 > 2.5 and body1 > 2.5 and at_local_high:
-                if cur_td_idx is not None:
-                    self._cooldown[code] = cur_td_idx
-                self._sell_position(code, pos, price, date, "两根中阴线清仓")
-                to_remove.append(code)
-                continue
+                # ---- L4: 两根平行中阴线 ----
+                C = sig["close"]
+                O = sig["open"]
+                c1, o1 = C[idx - 1], O[idx - 1]
+                bearish0 = price < open_price
+                bearish1 = c1 < o1
+                body0 = abs(open_price - price) / open_price * 100 if open_price > 0 else 0
+                body1 = abs(o1 - c1) / o1 * 100 if o1 > 0 else 0
+                at_local_high = hhv_h20 is not None and price >= hhv_h20[idx] * 0.97
+                if bearish0 and bearish1 and body0 > 2.5 and body1 > 2.5 and at_local_high:
+                    if cur_td_idx is not None:
+                        self._cooldown[code] = cur_td_idx
+                    self._sell_position(code, pos, price, date, "两根中阴线清仓")
+                    to_remove.append(code)
+                    continue
 
-            # ---- L5: 参考线次日确认 ----
-            wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 100
-            if wy_gap_pct <= 10:
-                l5_ref = yellow_val
-                l5_name = "黄线"
-            elif pos.sl_based_on_yellow:
-                l5_ref = yellow_val * 1.01
-                l5_name = "黄线+1%"
-            else:
-                l5_ref = white_val * 1.01
-                l5_name = "白线+1%"
-
-            if pos.white_break_pending:
-                if price < l5_ref:
-                    # 例外: 缩量+关键K内 或 未加速+缩量 → 不卖
-                    if is_shrinking and in_key_k:
-                        pos.white_break_pending = False
-                    elif not pos.has_accelerated and is_shrinking:
-                        pos.white_break_pending = False
-                    else:
-                        if cur_td_idx is not None:
-                            self._cooldown[code] = cur_td_idx
-                        self._sell_position(code, pos, price, date, f"{l5_name}确认清仓")
-                        to_remove.append(code)
-                        continue
+                # ---- L5: 参考线次日确认 ----
+                wy_gap_pct = abs(white_val - yellow_val) / yellow_val * 100 if yellow_val > 0 else 100
+                if wy_gap_pct <= 10:
+                    l5_ref = yellow_val
+                    l5_name = "黄线"
+                elif pos.sl_based_on_yellow:
+                    l5_ref = yellow_val * 0.99
+                    l5_name = "黄线-1%"
                 else:
-                    pos.white_break_pending = False
-            else:
-                if price < l5_ref:
-                    pos.white_break_pending = True
-                    pos.white_break_bar = idx
+                    l5_ref = white_val * 0.99
+                    l5_name = "白线-1%"
+
+                if pos.white_break_pending:
+                    if price < l5_ref:
+                        # 例外: 缩量+关键K内 或 未加速+缩量 → 不卖
+                        if is_shrinking and in_key_k:
+                            pos.white_break_pending = False
+                        elif not pos.has_accelerated and is_shrinking:
+                            pos.white_break_pending = False
+                        else:
+                            if cur_td_idx is not None:
+                                self._cooldown[code] = cur_td_idx
+                            self._sell_position(code, pos, price, date, f"{l5_name}确认清仓")
+                            to_remove.append(code)
+                            continue
+                    else:
+                        pos.white_break_pending = False
+                else:
+                    if price < l5_ref:
+                        pos.white_break_pending = True
+                        pos.white_break_bar = idx
 
             # ---- L6: 放飞减仓 ----
             limit_up_price = round(prev_close * limit_pct, 2)
