@@ -16,7 +16,8 @@
 - [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系。运行回测时首先阅读此文档。
 
 - [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛→筹码密集过滤的串行过滤策略，包含综合天命打分、阵营过滤、流通市值过滤、砖型图强红共振、60日VWAP筹码密集、T+1开盘买入及三级退出逻辑。
-- [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、T+1合规检查、五级退出（止损→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、模拟结束强制清仓、MinuteFeed分钟数据支持。
+- [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、T+1合规检查、五级退出（止损→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、模拟结束强制清仓、MinuteFeed分钟数据支持。通过 strategy_tag 和参数差异化，N型砖策略复用同一模拟器。
+- [策略层：N型+砖策略](feature/strategy-nxing-zhuan.md): 动能砖的变体策略，仅使用金砖共振信号选股（跳过动能预过滤和筹码密集过滤），外加流通市值>50亿过滤。T+1日线开盘买入（无分钟确认），复用 DongnengZhuanSimulator 模拟器。
 
 ## SOP Documents
 

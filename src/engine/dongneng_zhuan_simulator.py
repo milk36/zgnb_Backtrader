@@ -48,7 +48,9 @@ class DongnengZhuanSimulator:
                  stop_loss_pct=4.0,
                  log_dir="logs",
                  minute_feed=None, minute_confirm_bars=3,
-                 minute_entry_enabled=True, minute_exit_enabled=True):
+                 minute_entry_enabled=True, minute_exit_enabled=True,
+                 strategy_tag="动能砖",
+                 brick_green_exit=False):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._initial_cash = initial_cash
@@ -63,6 +65,8 @@ class DongnengZhuanSimulator:
         self._confirm_bars = max(1, minute_confirm_bars)
         self._minute_entry = minute_entry_enabled and (minute_feed is not None)
         self._minute_exit = minute_exit_enabled and (minute_feed is not None)
+        self._tag = strategy_tag
+        self._brick_green_exit = brick_green_exit
 
         # 日志
         os.makedirs(log_dir, exist_ok=True)
@@ -112,17 +116,17 @@ class DongnengZhuanSimulator:
             last = self._trading_days[-1]
             years = pd.Series(self._trading_days.year).value_counts().sort_index()
             year_info = "  ".join(f"{y}年:{c}天" for y, c in years.items())
-            self._log(f"  [动能砖] 交易日历: {first.strftime('%Y-%m-%d')} ~ "
+            self._log(f"  [{self._tag}] 交易日历: {first.strftime('%Y-%m-%d')} ~ "
                       f"{last.strftime('%Y-%m-%d')}  共{len(self._trading_days)}天  [{year_info}]")
-            self._log(f"  [动能砖] 日志文件: {self._log_path}")
-            self._log(f"  [动能砖] 资金={self._initial_cash:,.0f}  "
+            self._log(f"  [{self._tag}] 日志文件: {self._log_path}")
+            self._log(f"  [{self._tag}] 资金={self._initial_cash:,.0f}  "
                       f"每只={self._per_position_cash:,.0f}  "
                       f"最多{self._max_positions}只  "
                       f"T+{self._t_plus_n}  最大持仓{self._max_hold_days}天  "
                       f"止损-{self._stop_loss_pct}%")
             mode_entry = "分钟确认" if self._minute_entry else "日线开盘"
             mode_exit = "分钟监控" if self._minute_exit else "日线检查"
-            self._log(f"  [动能砖] 入场={mode_entry}  出场={mode_exit}  "
+            self._log(f"  [{self._tag}] 入场={mode_entry}  出场={mode_exit}  "
                       f"确认bar数={self._confirm_bars}")
 
         last_td = self._trading_days[-1] if len(self._trading_days) > 0 else None
@@ -204,7 +208,7 @@ class DongnengZhuanSimulator:
                     _limit_pct = 1.20 if _is_tech else 1.10
                     _limit_up = round(prev_close * _limit_pct, 2)
                     if daily_open >= _limit_up:
-                        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] "
+                        self._log(f"  [{date.strftime('%Y-%m-%d')}] [{self._tag}] "
                                   f"放弃 {code}  涨停板不买入  "
                                   f"开盘={daily_open:.2f}>=涨停={_limit_up:.2f}")
                         continue
@@ -232,7 +236,7 @@ class DongnengZhuanSimulator:
                             break
 
                     if not confirmed:
-                        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] "
+                        self._log(f"  [{date.strftime('%Y-%m-%d')}] [{self._tag}] "
                                   f"放弃 {code}  开盘急跌未确认  "
                                   f"排名={rank_score:.2f}")
                         continue
@@ -264,7 +268,7 @@ class DongnengZhuanSimulator:
             self._positions[code] = pos
             self._cash -= total_cost
 
-            self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] 买入 {code}  "
+            self._log(f"  [{date.strftime('%Y-%m-%d')}] [{self._tag}] 买入 {code}  "
                       f"价格={buy_price:.2f}({buy_reason})  数量={shares}  "
                       f"止损={stop_loss:.2f}(-{self._stop_loss_pct}%)  排名={rank_score:.2f}  "
                       f"持仓={len(self._positions)}/{self._max_positions}  "
@@ -397,7 +401,8 @@ class DongnengZhuanSimulator:
             if minute_exited:
                 continue
 
-            # --- 日线级别检查 ---
+            # --- 日线级别检查（部分卖出已在分钟级执行则跳过同类条件） ---
+            minute_partial_done = partial_count_today > 0
 
             # 1. 止损（日线降级）
             if daily_close <= pos.stop_loss:
@@ -405,6 +410,16 @@ class DongnengZhuanSimulator:
                 self._sell_position(code, pos, daily_close, date, "止损")
                 to_remove.append(code)
                 continue
+
+            # 1.5 红砖变绿砖清仓
+            if self._brick_green_exit and idx >= 1:
+                brick_today = sig["brick_value"][idx]
+                brick_yesterday = sig["brick_value"][idx - 1]
+                if brick_today <= brick_yesterday:
+                    self._cooldown[code] = cur_idx
+                    self._sell_position(code, pos, daily_close, date, "红砖变绿砖清仓")
+                    to_remove.append(code)
+                    continue
 
             # 2. 涨停清仓 / 累计盈利≥10%清仓（日线降级）
             if (limit_up_price > 0 and daily_high >= limit_up_price) or pct_gain >= 10.0:
@@ -414,8 +429,8 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. 涨幅2%卖1/4（每天最多2次）
-            if pct_gain >= 2.0 and partial_count_today < 2:
+            # 3. 涨幅2%卖1/4（分钟级已执行则跳过）
+            if pct_gain >= 2.0 and not minute_partial_done:
                 self._partial_sell(code, pos, daily_close, date)
                 partial_count_today += 1
                 if pos.size <= 0:
@@ -469,7 +484,7 @@ class DongnengZhuanSimulator:
             "reason": f"涨2%{action}",
             "partial": not is_clearance,
         })
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] {action} {code}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] [{self._tag}] {action} {code}  "
                   f"价格={price:.2f}  数量={sell_size}  "
                   f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  "
                   f"剩余={pos.size}  "
@@ -495,7 +510,7 @@ class DongnengZhuanSimulator:
             "pnl_amount": pnl_amount,
             "reason": reason,
         })
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] [动能砖] 清仓 {code}  "
+        self._log(f"  [{date.strftime('%Y-%m-%d')}] [{self._tag}] 清仓 {code}  "
                   f"价格={price:.2f}  买入={pos.buy_price:.2f}  "
                   f"收益={pnl:+.2f}%({pnl_amount:+,.0f})  {reason}  "
                   f"持仓={len(self._positions)-1}/{self._max_positions}  "
@@ -566,7 +581,7 @@ class DongnengZhuanSimulator:
         }
 
     @staticmethod
-    def print_report(report, log_file=None):
+    def print_report(report, log_file=None, strategy_tag="动能砖"):
         """打印回测报告"""
         def _out(msg):
             print(msg)
@@ -575,7 +590,7 @@ class DongnengZhuanSimulator:
                 log_file.flush()
 
         _out(f"\n{'=' * 55}")
-        _out(f"          [动能砖] 组合回测报告")
+        _out(f"          [{strategy_tag}] 组合回测报告")
         _out(f"{'=' * 55}")
         _out(f"  回测区间:    {report['trading_days']} 个交易日")
         _out(f"  初始资金:    {report['initial_cash']:>12,.2f}")

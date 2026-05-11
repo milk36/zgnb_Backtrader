@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-动能+砖策略的专用组合级日频模拟引擎。支持分钟级入场确认和出场监控，五级退出机制，以及涨幅2%部分卖出。与 PortfolioSimulator 的区别：T+1分钟确认买入、五级退出（含部分卖出）、独立的资金/仓位配置。
+组合级日频+分钟级模拟引擎，原为动能+砖策略设计，现同时服务于动能砖和N型砖两个策略。通过 `strategy_tag` 参数和构造参数差异化（入场模式、止损比例等）实现复用。支持分钟级入场确认和出场监控，五级退出机制，以及涨幅2%部分卖出。
 
 ## 2. How it Works
 
@@ -79,6 +79,19 @@ __slots__ = ("code", "buy_date", "buy_price", "buy_low", "stop_loss",
 - 买入股数按 100 股整手计算
 - 止损冷却期：5个交易日内不再买入同一只
 
+### 策略复用（N型砖）
+
+N型砖策略复用本模拟器，通过构造参数差异化：
+
+| 参数 | 动能砖 | N型砖 |
+|------|--------|-------|
+| strategy_tag | "动能砖" | "N型砖" |
+| minute_entry_enabled | True | False（日线开盘买入） |
+| stop_loss_pct | 4.0 | 2.0 |
+| max_hold_days | 5 | 6 |
+
+`strategy_tag` 影响日志前缀和报告标题，使两个策略的日志可区分。
+
 ### 配置参数（config.py DNZH_* 系列）
 
 | 参数 | 默认值 | 说明 |
@@ -102,8 +115,9 @@ __slots__ = ("code", "buy_date", "buy_price", "buy_low", "stop_loss",
 
 - `src/engine/dongneng_zhuan_simulator.py` - DongnengZhuanSimulator 类、Position 数据类
 - `src/data/minute_feed.py` - MinuteFeed 5分钟K线数据加载器
-- `src/strategies/dongneng_zhuan_strategy.py` - preload_all_signals() 预加载函数
-- `config.py` - DNZH_* 系列参数
+- `src/strategies/dongneng_zhuan_strategy.py` - preload_all_signals() 预加载函数（动能砖）
+- `src/strategies/nxing_zhuan_strategy.py` - preload_all_signals() 预加载函数（N型砖）
+- `config.py` - DNZH_* 系列参数（动能砖）、NXZH_* 系列参数（N型砖）
 
 ## 4. Attention
 
