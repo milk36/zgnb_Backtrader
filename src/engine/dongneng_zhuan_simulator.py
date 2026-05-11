@@ -390,6 +390,10 @@ class DongnengZhuanSimulator:
                             minute_exited = True
                             break
 
+                        # 2.5 盈利>=5%且启用红砖绿砖退出：跳过分钟级部分卖出，等日线红砖变绿砖
+                        if self._brick_green_exit and bar_pct >= self._profit_pct:
+                            continue
+
                         # 3. 涨幅卖1/4（首次>=2%，二次需>=5%，每天最多2次）
                         if partial_count_today < 2:
                             partial_threshold = 5.0 if partial_count_today >= 1 else 2.0
@@ -430,6 +434,10 @@ class DongnengZhuanSimulator:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, daily_close, date, reason)
                 to_remove.append(code)
+                continue
+
+            # 2.5 盈利>=5%且启用红砖绿砖退出：持股等红砖变绿砖，跳过后续退出条件
+            if self._brick_green_exit and pct_gain >= self._profit_pct:
                 continue
 
             # 3. 涨幅卖1/4（分钟级已执行则需>=5%，否则>=2%，每天最多2次）

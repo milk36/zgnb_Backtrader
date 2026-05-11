@@ -1,10 +1,11 @@
 """N型+砖 策略
 
 策略逻辑：
-1. 基于金砖信号选股（砖型图、绿转强红共振、黄柱动能）
-2. 无动能预过滤、无筹码密集过滤，外加流通市值 > 50亿过滤
-3. 按"下大上小"排序取前2只
-4. T+1 开盘买入，止损-2% / 红砖变绿砖清仓 / 2日不拉升 / 涨停清仓 / 涨幅2%卖1/4 / 脱离成本5%持仓4-6天
+1. N型拉升形态检测（近30日有量价齐升波段，当前处于回调阶段）
+2. 基于金砖信号选股（砖型图、绿转强红共振、黄柱动能）
+3. 无动能预过滤、无筹码密集过滤，外加流通市值 > 50亿过滤
+4. 按"下大上小"排序取前2只
+5. T+1 开盘买入，止损-2% / 红砖变绿砖清仓 / 2日不拉升 / 涨停清仓 / 涨幅2%卖1/4 / 脱离成本5%持仓4-6天
 
 选股公式来源：thinking/N型砖.md
 """
@@ -13,6 +14,8 @@ import time
 
 import numpy as np
 import pandas as pd
+
+from MyTT import REF, MA, HHV, EXIST
 
 from config import (
     TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS,
@@ -41,14 +44,64 @@ def _init_process(tdxdir, market):
 
 
 # ================================================================== #
+#  N型拉升形态检测                                                      #
+# ================================================================== #
+
+def _compute_nxing_pattern(C, H, L, O, V, code):
+    """N型拉升形态检测（向量化）
+
+    条件：
+    1. 近30日存在量价齐升的拉升波段（5日涨幅>=12% 且 成交量>5日均量×1.3）
+    2. 当前处于拉升后的回调阶段（收盘价低于近20日最高价3%以上）
+    3. 前期无S1/大风车（60日内无极端放量长上影：量>20日均量×3 且 上影>=3% 且 涨幅>=3%）
+    4. 前期无跳空涨停（60日内无开盘跳空涨停）
+    """
+    n = len(C)
+    if n < 65:
+        return np.zeros(n, dtype=bool)
+
+    REFC5 = REF(C, 5)
+    REFC = REF(C, 1)
+
+    # ---- 1. 拉升波段检测 ----
+    pct_5d = np.where(REFC5 > 0, (C - REFC5) / REFC5 * 100, 0)
+    vol_ma5 = MA(V, 5)
+    vol_expand = V > vol_ma5 * 1.3
+    rally = (pct_5d >= 12) & vol_expand
+    rally_recent = EXIST(rally, 30)
+
+    # ---- 2. 回调检测 ----
+    hhv_20 = HHV(H, 20)
+    pullback = np.where(hhv_20 > 0, (hhv_20 - C) / hhv_20 * 100, 0) >= 3
+
+    # ---- 3. S1/大风车排除 ----
+    # 极端放量长上影阳线（出货信号）：量>20日均量×3 且 上影>=3% 且 涨幅>=3%
+    pct_chg = np.where(REFC > 0, (C - REFC) / REFC * 100, 0)
+    upper_shadow_pct = (H - np.maximum(O, C)) / np.where(L > 0, L, 0.001) * 100
+    vol_ma20 = MA(V, 20)
+    s1_signal = (V > vol_ma20 * 3) & (upper_shadow_pct >= 3) & (pct_chg >= 3)
+    no_s1 = ~EXIST(s1_signal, 60)
+
+    # ---- 4. 跳空涨停排除 ----
+    # 开盘>昨收×1.02（跳空）且 收盘>=昨收×涨停比例×0.995
+    is_tech = code[:2] in ("30", "68")
+    limit_pct = 1.195 if is_tech else 1.095
+    gap_limit = (O > REFC * 1.02) & (C >= REFC * limit_pct)
+    no_gap_limit = ~EXIST(gap_limit, 60)
+
+    return rally_recent & pullback & no_s1 & no_gap_limit
+
+
+# ================================================================== #
 #  信号计算                                                            #
 # ================================================================== #
 
 def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
-    """N型砖信号：仅使用金砖信号 + 流通市值过滤
+    """N型砖信号：N型拉升形态 + 金砖信号 + 流通市值过滤
 
     复用动能砖的 _compute_all_bar_signals 计算，然后：
-    - 将 final_ok 设为 jinzhuan_ok & liutong_mask
+    - 新增 N型拉升形态过滤（近30日有拉升波段 + 当前回调）
+    - 将 final_ok 设为 jinzhuan_ok & nxing_pattern & liutong_mask
     - 跳过动能预过滤(dongneng_recent)和筹码密集(chip_dense)
     """
     signals = _dnzh_compute(C, H, L, O, V, dates, code, params)
@@ -56,6 +109,9 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
         return None
 
     jinzhuan_ok = signals["jinzhuan_ok"]
+
+    # N型拉升形态过滤
+    nxing_pattern = _compute_nxing_pattern(C, H, L, O, V, code)
 
     # 流通市值过滤
     capital_shares = params.get("capital_shares")
@@ -67,7 +123,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     else:
         liutong_mask = np.ones(n, dtype=bool)
 
-    nxing_ok = jinzhuan_ok & liutong_mask
+    nxing_ok = jinzhuan_ok & nxing_pattern & liutong_mask
 
     # Override final signals
     signals["any_ok"] = nxing_ok
