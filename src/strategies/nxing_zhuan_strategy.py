@@ -1,7 +1,7 @@
 """N型+砖 策略
 
 策略逻辑：
-1. N型拉升形态检测（近30日有量价齐升波段，当前处于回调阶段）
+1. N型缩量回调形态检测（近20日高点+涨幅15%-50%+量价齐升+缩量深回调15%+窄幅整理）
 2. 基于金砖信号选股（砖型图、绿转强红共振、黄柱动能）
 3. 无动能预过滤、无筹码密集过滤，外加流通市值 > 50亿过滤
 4. 按"下大上小"排序取前2只
@@ -15,7 +15,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from MyTT import REF, MA, HHV, EXIST
+from MyTT import REF, MA, HHV, LLV, EXIST
 
 from config import (
     TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS,
@@ -44,52 +44,116 @@ def _init_process(tdxdir, market):
 
 
 # ================================================================== #
+#  辅助函数                                                            #
+# ================================================================== #
+
+
+def _hhvbars(H, N):
+    """HHVBARS: N周期内最高值距当前的bar数"""
+    n = len(H)
+    result = np.zeros(n)
+    for i in range(n):
+        start = max(0, i - N + 1)
+        window = H[start:i + 1]
+        result[i] = len(window) - 1 - np.argmax(window)
+    return result
+
+
+def _dyn_ref(arr, offsets):
+    """动态REF: 对每个位置i, 返回 arr[i - int(offsets[i])]"""
+    n = len(arr)
+    indices = np.arange(n, dtype=int) - np.asarray(offsets, dtype=int)
+    indices = np.clip(indices, 0, n - 1)
+    return arr[indices]
+
+
+def _every(cond, N):
+    """EVERY: 最近N期cond全为True"""
+    n = len(cond)
+    result = np.zeros(n, dtype=bool)
+    for i in range(n):
+        start = max(0, i - N + 1)
+        result[i] = np.all(cond[start:i + 1])
+    return result
+
+
+# ================================================================== #
 #  N型拉升形态检测                                                      #
 # ================================================================== #
 
 def _compute_nxing_pattern(C, H, L, O, V, code):
-    """N型拉升形态检测（向量化）
+    """N型缩量回调形态检测（向量化）
 
-    条件：
-    1. 近30日存在量价齐升的拉升波段（5日涨幅>=12% 且 成交量>5日均量×1.3）
-    2. 当前处于拉升后的回调阶段（收盘价低于近20日最高价3%以上）
-    3. 前期无S1/大风车（60日内无极端放量长上影：量>20日均量×3 且 上影>=3% 且 涨幅>=3%）
-    4. 前期无跳空涨停（60日内无开盘跳空涨停）
+    基于通达信选股公式（N型上涨-缩量深回调+窄幅整理+市值筛选）:
+    1. 近20日存在高点（距今日>=5天）
+    2. 高点前10日内有起涨低点，涨幅15%-50%
+    3. 上涨段量能放大（10日均量 > 前期10日均量 × 1.5）
+    4. 20日内无跳空涨停（排除无量一字板拉升）
+    5. 高点当日未放量（量 < 上涨段最大量 × 0.9）
+    6. 当前处于回调（收盘低于高点且高于起涨点）
+    7. 回调缩量（5日均量 < 上涨段均量 × 0.8）
+    8. 回调幅度 >= 15%
+    9. 近5日窄幅整理（单日振幅 <= 10%）
     """
+    N_LOOKBACK = 20
+    MIN_RISE_PCT = 15
+    MAX_RISE_PCT = 50
+    VOL_RATIO = 1.5
+    MIN_PULLBACK_PCT = 15
+    MAX_AMPLITUDE_PCT = 10
+    MIN_HIGH_BARS = 5
+
     n = len(C)
     if n < 65:
         return np.zeros(n, dtype=bool)
 
-    REFC5 = REF(C, 5)
     REFC = REF(C, 1)
+    REFH = REF(H, 1)
 
-    # ---- 1. 拉升波段检测 ----
-    pct_5d = np.where(REFC5 > 0, (C - REFC5) / REFC5 * 100, 0)
+    # ---- 1. 识别近期高点 ----
+    hhv_20 = HHV(H, N_LOOKBACK)
+    hhvbars_20 = _hhvbars(H, N_LOOKBACK)
+    high_ok = (hhvbars_20 >= MIN_HIGH_BARS) & (hhvbars_20 < N_LOOKBACK)
+
+    # ---- 2. 上涨起点与涨幅 ----
+    llv_10 = LLV(L, 10)
+    rise_low = _dyn_ref(llv_10, hhvbars_20 + 1)
+    rise_pct = np.where(rise_low > 0, (hhv_20 - rise_low) / rise_low * 100, 0)
+    rise_ok = (rise_pct >= MIN_RISE_PCT) & (rise_pct < MAX_RISE_PCT)
+
+    # ---- 3. 上涨段量价齐升 ----
+    vol_ma10 = MA(V, 10)
+    rise_vol_ma = _dyn_ref(vol_ma10, hhvbars_20 + 5)
+    pre_vol_ma = _dyn_ref(vol_ma10, hhvbars_20 + 15)
+    vol_ok = rise_vol_ma > pre_vol_ma * VOL_RATIO
+
+    # ---- 4. 非跳空拉涨 ----
+    gap_limit = (L > REFH) & (np.where(REFC > 0, C / REFC, 1) > 1.095)
+    no_gap_limit = ~EXIST(gap_limit, 20)
+
+    # ---- 5. 高点未放量 ----
+    hhv_vol_10 = HHV(V, 10)
+    max_rise_vol = _dyn_ref(hhv_vol_10, hhvbars_20 + 1)
+    high_bar_vol = _dyn_ref(V, hhvbars_20)
+    high_no_vol = high_bar_vol < max_rise_vol * 0.9
+
+    # ---- 6. 当前处于回调 ----
+    in_pullback = (C < hhv_20) & (C > rise_low)
+
+    # ---- 7. 回调缩量 ----
     vol_ma5 = MA(V, 5)
-    vol_expand = V > vol_ma5 * 1.3
-    rally = (pct_5d >= 12) & vol_expand
-    rally_recent = EXIST(rally, 30)
+    pullback_shrink = vol_ma5 < rise_vol_ma * 0.8
 
-    # ---- 2. 回调检测 ----
-    hhv_20 = HHV(H, 20)
-    pullback = np.where(hhv_20 > 0, (hhv_20 - C) / hhv_20 * 100, 0) >= 3
+    # ---- 8. 回调幅度 ----
+    pullback_pct = np.where(hhv_20 > 0, (hhv_20 - C) / hhv_20 * 100, 0)
+    deep_pullback = pullback_pct >= MIN_PULLBACK_PCT
 
-    # ---- 3. S1/大风车排除 ----
-    # 极端放量长上影阳线（出货信号）：量>20日均量×3 且 上影>=3% 且 涨幅>=3%
-    pct_chg = np.where(REFC > 0, (C - REFC) / REFC * 100, 0)
-    upper_shadow_pct = (H - np.maximum(O, C)) / np.where(L > 0, L, 0.001) * 100
-    vol_ma20 = MA(V, 20)
-    s1_signal = (V > vol_ma20 * 3) & (upper_shadow_pct >= 3) & (pct_chg >= 3)
-    no_s1 = ~EXIST(s1_signal, 60)
+    # ---- 9. 窄幅整理 ----
+    amplitude = np.where(REFC > 0, (H - L) / REFC * 100, 0)
+    narrow = _every(amplitude <= MAX_AMPLITUDE_PCT, 5)
 
-    # ---- 4. 跳空涨停排除 ----
-    # 开盘>昨收×1.02（跳空）且 收盘>=昨收×涨停比例×0.995
-    is_tech = code[:2] in ("30", "68")
-    limit_pct = 1.195 if is_tech else 1.095
-    gap_limit = (O > REFC * 1.02) & (C >= REFC * limit_pct)
-    no_gap_limit = ~EXIST(gap_limit, 60)
-
-    return rally_recent & pullback & no_s1 & no_gap_limit
+    return (high_ok & rise_ok & vol_ok & no_gap_limit & high_no_vol
+            & in_pullback & pullback_shrink & deep_pullback & narrow)
 
 
 # ================================================================== #
