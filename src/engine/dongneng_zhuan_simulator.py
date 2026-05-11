@@ -50,7 +50,8 @@ class DongnengZhuanSimulator:
                  minute_feed=None, minute_confirm_bars=3,
                  minute_entry_enabled=True, minute_exit_enabled=True,
                  strategy_tag="动能砖",
-                 brick_green_exit=False):
+                 brick_green_exit=False,
+                 limit_up_exit=True):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._initial_cash = initial_cash
@@ -67,8 +68,7 @@ class DongnengZhuanSimulator:
         self._minute_exit = minute_exit_enabled and (minute_feed is not None)
         self._tag = strategy_tag
         self._brick_green_exit = brick_green_exit
-
-        # 日志
+        self._limit_up_exit = limit_up_exit
         os.makedirs(log_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         tag_prefix = self._tag
@@ -381,7 +381,7 @@ class DongnengZhuanSimulator:
                             break
 
                         # 2. 涨停清仓 / 累计盈利≥10%清仓
-                        if (limit_up_price > 0 and bar_high >= limit_up_price) or bar_pct >= 10.0:
+                        if self._limit_up_exit and ((limit_up_price > 0 and bar_high >= limit_up_price) or bar_pct >= 10.0):
                             reason = "涨停清仓" if (limit_up_price > 0 and bar_high >= limit_up_price) else f"盈利{bar_pct:.1f}%清仓"
                             self._cooldown[code] = cur_idx
                             self._sell_position(code, pos, bar_close, date,
@@ -429,7 +429,7 @@ class DongnengZhuanSimulator:
                     continue
 
             # 2. 涨停清仓 / 累计盈利≥10%清仓（日线降级）
-            if (limit_up_price > 0 and daily_high >= limit_up_price) or pct_gain >= 10.0:
+            if self._limit_up_exit and ((limit_up_price > 0 and daily_high >= limit_up_price) or pct_gain >= 10.0):
                 reason = "涨停清仓" if (limit_up_price > 0 and daily_high >= limit_up_price) else f"盈利{pct_gain:.1f}%清仓"
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, daily_close, date, reason)

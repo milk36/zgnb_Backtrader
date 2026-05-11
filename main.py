@@ -41,6 +41,7 @@ from config import (
     NXZH_MINUTE_ENTRY_ENABLED,
     NXZH_MINUTE_EXIT_ENABLED,
     NXZH_BRICK_GREEN_EXIT,
+    NXZH_LIMIT_UP_EXIT,
     LOG_DIR,
     MARKET_INDEX_CODE,
 )
@@ -268,7 +269,8 @@ def main():
             minute_entry_enabled=NXZH_MINUTE_ENTRY_ENABLED,
             minute_exit_enabled=NXZH_MINUTE_EXIT_ENABLED,
             strategy_tag="N型砖",
-            brick_green_exit=NXZH_BRICK_GREEN_EXIT)
+            brick_green_exit=NXZH_BRICK_GREEN_EXIT,
+            limit_up_exit=NXZH_LIMIT_UP_EXIT)
         sim.run()
         report = sim.report()
         DongnengZhuanSimulator.print_report(report, log_file=sim._log_file,

@@ -82,6 +82,7 @@ NXZH_MINUTE_CONFIRM_BARS = 3         # 前3根5分钟线确认入场
 NXZH_MINUTE_ENTRY_ENABLED = True     # 启用分钟级入场确认
 NXZH_MINUTE_EXIT_ENABLED = True      # 启用分钟级止损/涨停检查
 NXZH_BRICK_GREEN_EXIT = True         # 持仓中红砖变绿砖则清仓
+NXZH_LIMIT_UP_EXIT = False           # 涨停清仓 / 累计盈利≥10%清仓（N型砖禁用）
 
 # 前复权
 QFQ_CACHE_ENABLED = True
