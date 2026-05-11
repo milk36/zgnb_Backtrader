@@ -42,6 +42,18 @@ from config import (
     NXZH_MINUTE_EXIT_ENABLED,
     NXZH_BRICK_GREEN_EXIT,
     NXZH_LIMIT_UP_EXIT,
+    JZH_INITIAL_CASH,
+    JZH_MAX_POSITIONS,
+    JZH_PER_POSITION,
+    JZH_T_PLUS_N,
+    JZH_MAX_HOLD_DAYS,
+    JZH_PROFIT_PCT,
+    JZH_STOP_LOSS_PCT,
+    JZH_MINUTE_CONFIRM_BARS,
+    JZH_MINUTE_ENTRY_ENABLED,
+    JZH_MINUTE_EXIT_ENABLED,
+    JZH_BRICK_GREEN_EXIT,
+    JZH_LIMIT_UP_EXIT,
     LOG_DIR,
     MARKET_INDEX_CODE,
 )
@@ -55,6 +67,7 @@ from src.strategies.huangbai_b1_v4_strategy import HuangBaiB1V4Strategy, scan_al
 from src.strategies.huangbai_b1_v5_strategy import HuangBaiB1V5Strategy, scan_all as scan_all_v5
 from src.strategies.dongneng_zhuan_strategy import scan_all as scan_all_dnzh
 from src.strategies.nxing_zhuan_strategy import scan_all as scan_all_nxzh
+from src.strategies.jinzhuan_strategy import scan_all as scan_all_jzh
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -65,6 +78,7 @@ STRATEGIES = {
     "huangbai_v5": HuangBaiB1V5Strategy,
     "dongneng_zhuan": None,  # 仅支持组合级模拟，不支持单股回测
     "nxing_zhuan": None,     # 仅支持组合级模拟，不支持单股回测
+    "jinzhuan": None,        # 仅支持组合级模拟，不支持单股回测
 }
 
 
@@ -275,6 +289,72 @@ def main():
         report = sim.report()
         DongnengZhuanSimulator.print_report(report, log_file=sim._log_file,
                                             strategy_tag="N型砖")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        return
+
+    # ---- 金砖策略 ----
+    if args.strategy == "jinzhuan":
+        if args.scan or args.scan_only:
+            print("=" * 55)
+            print("  金砖 全市场选股扫描")
+            print("=" * 55)
+            scan_all_jzh()
+            return
+
+        from src.engine.dongneng_zhuan_simulator import DongnengZhuanSimulator
+        from src.strategies.jinzhuan_strategy import preload_all_signals as preload_jzh
+
+        print("=" * 55)
+        print("  金砖 策略")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days = preload_jzh(
+            start=args.start, end=args.end)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: 组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {JZH_INITIAL_CASH:,.0f}  "
+              f"最多 {JZH_MAX_POSITIONS} 只  "
+              f"每只 {JZH_PER_POSITION:,.0f}")
+        print(f"{'=' * 55}")
+
+        from src.data.minute_feed import MinuteFeed
+        if JZH_MINUTE_ENTRY_ENABLED or JZH_MINUTE_EXIT_ENABLED:
+            minute_feed = MinuteFeed()
+        else:
+            minute_feed = None
+
+        sim = DongnengZhuanSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=JZH_INITIAL_CASH,
+            max_positions=JZH_MAX_POSITIONS,
+            per_position_cash=JZH_PER_POSITION,
+            commission=COMMISSION,
+            t_plus_n=JZH_T_PLUS_N,
+            max_hold_days=JZH_MAX_HOLD_DAYS,
+            profit_pct=JZH_PROFIT_PCT,
+            stop_loss_pct=JZH_STOP_LOSS_PCT,
+            log_dir=LOG_DIR,
+            minute_feed=minute_feed,
+            minute_confirm_bars=JZH_MINUTE_CONFIRM_BARS,
+            minute_entry_enabled=JZH_MINUTE_ENTRY_ENABLED,
+            minute_exit_enabled=JZH_MINUTE_EXIT_ENABLED,
+            strategy_tag="金砖",
+            brick_green_exit=JZH_BRICK_GREEN_EXIT,
+            limit_up_exit=JZH_LIMIT_UP_EXIT)
+        sim.run()
+        report = sim.report()
+        DongnengZhuanSimulator.print_report(report, log_file=sim._log_file,
+                                            strategy_tag="金砖")
 
         if args.chart:
             from src.charting import generate_charts

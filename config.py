@@ -84,6 +84,23 @@ NXZH_MINUTE_EXIT_ENABLED = True      # 启用分钟级止损/涨停检查
 NXZH_BRICK_GREEN_EXIT = True         # 持仓中红砖变绿砖则清仓
 NXZH_LIMIT_UP_EXIT = False           # 涨停清仓 / 累计盈利≥10%清仓（N型砖禁用）
 
+# 金砖组合模拟参数
+JZH_INITIAL_CASH = 100_000           # 10万
+JZH_MAX_POSITIONS = 2                # 最多2只
+JZH_PER_POSITION = 50_000            # 每只5万
+JZH_T_PLUS_N = 2                     # 2日不拉升清仓
+JZH_MAX_HOLD_DAYS = 6                # 脱离成本5%以上持仓最多6天
+JZH_PROFIT_PCT = 5.0                 # 脱离成本区百分比
+JZH_STOP_LOSS_PCT = 2.0              # 止损百分比（买入价下跌2%）
+JZH_MIN_MARKET_CAP = 50.0            # 流通市值最低阈值（亿元）
+JZH_S1_PERIOD = 60                   # S1/大风车检测回溯天数
+JZH_GAP_LIMIT_PERIOD = 60            # 跳空涨停检测回溯天数
+JZH_MINUTE_CONFIRM_BARS = 3          # 前3根5分钟线确认入场
+JZH_MINUTE_ENTRY_ENABLED = True      # 启用分钟级入场确认
+JZH_MINUTE_EXIT_ENABLED = True       # 启用分钟级止损/涨停检查
+JZH_BRICK_GREEN_EXIT = True          # 持仓中红砖变绿砖则清仓
+JZH_LIMIT_UP_EXIT = True             # 涨停清仓 / 累计盈利≥10%清仓
+
 # 前复权
 QFQ_CACHE_ENABLED = True
 QFQ_CACHE_DIR = "cache/qfq"
