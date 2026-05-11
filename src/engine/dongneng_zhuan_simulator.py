@@ -71,7 +71,8 @@ class DongnengZhuanSimulator:
         # 日志
         os.makedirs(log_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._log_path = os.path.join(log_dir, f"dnzh_portfolio_{ts}.log")
+        tag_prefix = self._tag
+        self._log_path = os.path.join(log_dir, f"{tag_prefix}_portfolio_{ts}.log")
         self._log_file = open(self._log_path, "a", encoding="utf-8")
 
         # 为每只股票预构建日期查找索引
@@ -389,14 +390,16 @@ class DongnengZhuanSimulator:
                             minute_exited = True
                             break
 
-                        # 3. 涨幅2%卖1/4（每天最多2次）
-                        if bar_pct >= 2.0 and partial_count_today < 2:
-                            self._partial_sell(code, pos, bar_close, date)
-                            partial_count_today += 1
-                            if pos.size <= 0:
-                                to_remove.append(code)
-                                minute_exited = True
-                                break
+                        # 3. 涨幅卖1/4（首次>=2%，二次需>=5%，每天最多2次）
+                        if partial_count_today < 2:
+                            partial_threshold = 5.0 if partial_count_today >= 1 else 2.0
+                            if bar_pct >= partial_threshold:
+                                self._partial_sell(code, pos, bar_close, date)
+                                partial_count_today += 1
+                                if pos.size <= 0:
+                                    to_remove.append(code)
+                                    minute_exited = True
+                                    break
 
             if minute_exited:
                 continue
@@ -429,13 +432,15 @@ class DongnengZhuanSimulator:
                 to_remove.append(code)
                 continue
 
-            # 3. 涨幅2%卖1/4（分钟级已执行则跳过）
-            if pct_gain >= 2.0 and not minute_partial_done:
-                self._partial_sell(code, pos, daily_close, date)
-                partial_count_today += 1
-                if pos.size <= 0:
-                    to_remove.append(code)
-                    continue
+            # 3. 涨幅卖1/4（分钟级已执行则需>=5%，否则>=2%，每天最多2次）
+            if partial_count_today < 2:
+                partial_threshold = 5.0 if minute_partial_done else 2.0
+                if pct_gain >= partial_threshold:
+                    self._partial_sell(code, pos, daily_close, date)
+                    partial_count_today += 1
+                    if pos.size <= 0:
+                        to_remove.append(code)
+                        continue
 
             # 4. T+N不拉升清仓（涨幅不足2%视为不拉升）
             if days_held >= self._t_plus_n and pct_gain < 2.0:
