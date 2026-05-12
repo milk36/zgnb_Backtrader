@@ -401,8 +401,8 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 1.5 跌破黄线清仓（黄线以下建仓时跳过）
-            if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy):
+            # 1.5 跌破黄线清仓（黄线以下建仓且未部分止盈时跳过）
+            if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy and not pos.partial_sold):
                 cur_idx = self._td_index.get(date)
                 if cur_idx is not None:
                     self._cooldown[code] = cur_idx
@@ -602,9 +602,9 @@ class PortfolioSimulator:
                                 pos.hold_until_below_white = True
                         continue
 
-                    # 7. 中阳卖1/3（当日上涨 + 累计盈利达标，仅触发一次）
-                    if not pos.mid_yang_triggered and daily_up:
-                        if pct_gain >= mid_yang:
+                    # 7. 中阳卖1/3（当日上涨+盈利达标 或 累计盈利≥10%，仅触发一次）
+                    if not pos.mid_yang_triggered:
+                        if (daily_up and pct_gain >= mid_yang) or pct_gain >= 7:
                             sell_size = max(1, pos.size // 3)
                             if sell_size < pos.size:
                                 self._sell_partial(code, pos, sell_size, price, date, "中阳卖1/3")
