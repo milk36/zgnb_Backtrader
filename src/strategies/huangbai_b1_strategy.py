@@ -334,7 +334,8 @@ class HuangBaiB1Strategy(BaseStrategy):
         # S1/大风车排除：加速上涨后出现放天量大阴线或历史天量长上下影阴线
         _s1p = HUANGBAI_S1_PERIOD
         _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
-        _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+        _recent_limit = EXIST(_limit_up, 3)
+        _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
         _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
         _s1 = _accel & _big_vol & _big_yin
         _upper_shadow = H - np.maximum(O, C)
@@ -781,7 +782,8 @@ def _compute_signals(C, H, L, O, V, dates, params):
     # S1/大风车排除
     _s1p = HUANGBAI_S1_PERIOD
     _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
-    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+    _recent_limit = EXIST(_limit_up, 3)
+    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
     _s1 = _accel & _big_vol & _big_yin
     _upper_shadow = H - np.maximum(O, C)
@@ -1143,7 +1145,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     # S1/大风车排除
     _s1p = HUANGBAI_S1_PERIOD
     _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
-    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3)
+    _recent_limit = EXIST(_limit_up, 3)
+    _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
     _s1 = _accel & _big_vol & _big_yin
     _upper_shadow = H - np.maximum(O, C)
