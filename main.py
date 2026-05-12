@@ -397,6 +397,10 @@ def main():
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
 
     # ---- huangbai_v2 策略：组合级模拟（含大盘MACD过滤） ----
@@ -442,7 +446,7 @@ def main():
 
         if args.chart:
             from src.charting import generate_charts
-            generate_charts(report["trade_list"], sim._all_signals)
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
     if strategy_cls == HuangBaiB1V3Strategy and args.portfolio:
         from src.engine.portfolio_simulator import PortfolioSimulator
@@ -484,7 +488,12 @@ def main():
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V3]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
+
     if strategy_cls == HuangBaiB1V4Strategy and args.portfolio:
         from src.engine.portfolio_simulator import PortfolioSimulator
         from src.strategies.huangbai_b1_v4_strategy import preload_all_signals as preload_v4
@@ -528,7 +537,7 @@ def main():
 
         if args.chart:
             from src.charting import generate_charts
-            generate_charts(report["trade_list"], sim._all_signals)
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
 
     # ---- huangbai_v5 组合级模拟 ----
@@ -575,7 +584,7 @@ def main():
 
         if args.chart:
             from src.charting import generate_charts
-            generate_charts(report["trade_list"], sim._all_signals)
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
 
     # ---- huangbai 策略：全市场扫描 + 回测 ----

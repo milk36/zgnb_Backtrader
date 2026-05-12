@@ -1289,6 +1289,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     _price_near = ABS(C - _vwap) / np.maximum(_vwap, 0.001) <= 0.10
     chip_dense = _conc_low & _price_near
 
+    # ---- 砖型图 ----
+    hhv4 = HHV(H, 4)
+    llv4 = LLV(L, 4)
+    _br1 = (hhv4 - C) / np.maximum(hhv4 - llv4, 0.001) * 100 - 90
+    _br2 = SMA(_br1, 4, 1) + 100
+    _br3 = (C - llv4) / np.maximum(hhv4 - llv4, 0.001) * 100
+    _br4 = SMA(_br3, 6, 1)
+    _br5 = SMA(_br4, 6, 1) + 100
+    _br6 = _br5 - _br2
+    brick = np.where(_br6 > 4, _br6 - 4, 0)
+
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
@@ -1308,6 +1319,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "open": O,
         "volume": V,
         "dates": dates,
+        "brick_value": brick,
     }
 
 

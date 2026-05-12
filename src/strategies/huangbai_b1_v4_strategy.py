@@ -566,6 +566,14 @@ class HuangBaiB1V4Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
+        # 1.5 跌破黄线清仓
+        if price < self._yellow[idx]:
+            self.order = self.order_target_percent(target=0.0)
+            self._last_sl_bar = len(self)
+            self.log(f"跌破黄线清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")
+            self._reset_position_state()
+            return
+
         # 2. T+3 没涨清仓
         if bars_held >= self.p.t_plus_n and price <= self.buy_info["price"]:
             self.order = self.order_target_percent(target=0.0)
@@ -1350,6 +1358,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _price_near = ABS(C - _vwap) / np.maximum(_vwap, 0.001) <= 0.10
     chip_dense = _conc_low & _price_near
 
+    # ---- 砖型图 ----
+    hhv4 = HHV(H, 4)
+    llv4 = LLV(L, 4)
+    _br1 = (hhv4 - C) / np.maximum(hhv4 - llv4, 0.001) * 100 - 90
+    _br2 = SMA(_br1, 4, 1) + 100
+    _br3 = (C - llv4) / np.maximum(hhv4 - llv4, 0.001) * 100
+    _br4 = SMA(_br3, 6, 1)
+    _br5 = SMA(_br4, 6, 1) + 100
+    _br6 = _br5 - _br2
+    brick = np.where(_br6 > 4, _br6 - 4, 0)
+
     return {
         "weekly_bull": weekly_bull,
         "above_ma30w": above_ma30w,
@@ -1370,6 +1389,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
         "open": O,
         "volume": V,
         "dates": dates,
+        "brick_value": brick,
     }
 
 

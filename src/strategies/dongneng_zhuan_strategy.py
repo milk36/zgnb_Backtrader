@@ -510,6 +510,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
         "open": O,
         "high": H,
         "low": L,
+        "volume": V,
         "dates": dates,
         "pct_change": pct_chg,
         "brick_value": brick,

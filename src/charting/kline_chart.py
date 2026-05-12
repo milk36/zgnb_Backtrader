@@ -29,6 +29,10 @@ COLOR_SELL = "#ff0000"    # 卖出标记
 COLOR_SELL_PARTIAL = "#ff8800"  # 部分卖出标记
 COLOR_STOP_LOSS = "#ff6600"  # 止损线橙
 COLOR_COST = "#00ccff"    # 成本线蓝
+COLOR_NXING_HIGH = "#ff0000"    # N型高点标记红
+COLOR_NXING_LOW = "#00aa00"     # N型低点标记绿
+COLOR_NXING_RISE = "#00cc00"    # N型拉升阶段背景
+COLOR_NXING_PULLBACK = "#ff8800"  # N型回调阶段背景
 DPI = 150
 PADDING = 30              # 买卖前后额外显示的bar数
 FIG_WIDTH = 16
@@ -111,11 +115,19 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     bbi_s = bbi[s] if bbi is not None else None
 
     # 创建图表
-    fig, (ax_price, ax_vol) = plt.subplots(
-        2, 1, figsize=(FIG_WIDTH, FIG_HEIGHT),
-        gridspec_kw={"height_ratios": [3, 1]},
-        sharex=True,
-    )
+    has_brick = sub_chart == "brick" and sig.get("brick_value") is not None
+    if has_brick:
+        fig, (ax_price, ax_vol, ax_brick) = plt.subplots(
+            3, 1, figsize=(FIG_WIDTH, FIG_HEIGHT),
+            gridspec_kw={"height_ratios": [3, 1, 1]},
+            sharex=True,
+        )
+    else:
+        fig, (ax_price, ax_vol) = plt.subplots(
+            2, 1, figsize=(FIG_WIDTH, FIG_HEIGHT),
+            gridspec_kw={"height_ratios": [3, 1]},
+            sharex=True,
+        )
     fig.subplots_adjust(hspace=0.05)
 
     # 绘制K线
@@ -126,22 +138,29 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     # 绘制指标线
     _draw_indicators(ax_price, x, white_s, yellow_s, bbi_s)
 
+    # 绘制N型阶段标注
+    _draw_nxing_phases(ax_price, sig, i_start, i_end, code=code)
+
     # 绘制买卖标记
     _draw_trade_markers(ax_price, x, dates_s, trades)
 
     # 绘制副图
-    if sub_chart == "brick" and sig.get("brick_value") is not None:
+    if has_brick:
         brick_s = sig["brick_value"][s]
-        _draw_brick(ax_vol, x, brick_s, n)
-        ax_vol.set_ylabel("砖型图", fontsize=10)
+        _draw_volume(ax_vol, x, V_s, O_s, C_s, n)
+        ax_vol.set_ylabel("成交量", fontsize=10)
+        _draw_brick(ax_brick, x, brick_s, n)
+        ax_brick.set_ylabel("砖型图", fontsize=10)
+        last_ax = ax_brick
     else:
         _draw_volume(ax_vol, x, V_s, O_s, C_s, n)
         ax_vol.set_ylabel("成交量", fontsize=10)
+        last_ax = ax_vol
 
     # 格式化X轴日期
     step = max(1, n // 15)
-    ax_vol.set_xticks(x[::step])
-    ax_vol.set_xticklabels(
+    last_ax.set_xticks(x[::step])
+    last_ax.set_xticklabels(
         [pd_timestamp_to_str(d) for d in dates_s[::step]],
         rotation=45, fontsize=8,
     )
@@ -183,6 +202,15 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
                                     linestyle="--", lw=1.0, label="止损线"))
     legend_items.append(plt.Line2D([0], [0], color=COLOR_COST,
                                     linestyle=":", lw=0.8, label="成本线"))
+    if sig.get("nxing_pattern") is not None and np.any(sig["nxing_pattern"]):
+        legend_items.append(plt.Line2D([0], [0], marker="D", color=COLOR_NXING_HIGH,
+                                        linestyle="None", markersize=6, label="N型高点"))
+        legend_items.append(plt.Line2D([0], [0], marker="D", color=COLOR_NXING_LOW,
+                                        linestyle="None", markersize=5, label="N型低点"))
+        legend_items.append(mpatches.Patch(facecolor=COLOR_NXING_RISE, alpha=0.2,
+                                            label="N型拉升"))
+        legend_items.append(mpatches.Patch(facecolor=COLOR_NXING_PULLBACK, alpha=0.2,
+                                            label="N型回调"))
     ax_price.legend(handles=legend_items, loc="upper left", fontsize=8,
                     framealpha=0.9, facecolor="white")
 
@@ -190,6 +218,9 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     ax_vol.set_facecolor("white")
     ax_price.grid(True, alpha=0.3)
     ax_vol.grid(True, alpha=0.3)
+    if has_brick:
+        ax_brick.set_facecolor("white")
+        ax_brick.grid(True, alpha=0.3)
 
     # 保存
     filename = f"{code}_{first_str}_{last_str}.png".replace("-", "")
@@ -361,6 +392,118 @@ def _draw_trade_markers(ax, x, dates_s, trades):
                     xytext=(0, 12), textcoords="offset points",
                     fontsize=7, color=marker_color, ha="center",
                 )
+
+
+def _draw_nxing_phases(ax, sig, i_start, i_end, code=None):
+    """标注N型拉升和回调阶段"""
+    if sig.get("nxing_pattern") is None:
+        # 按需计算N型形态数据（huangbai等策略未预计算时）
+        if code is None:
+            return
+        C = sig.get("close")
+        H = sig.get("high")
+        L = sig.get("low")
+        O = sig.get("open")
+        V = sig.get("volume")
+        if any(x is None for x in [C, H, L, O, V]):
+            return
+        from src.strategies.nxing_zhuan_strategy import _compute_nxing_pattern
+        nxing_pattern, nxing_hhvbars, nxing_hhv, nxing_rise_low = \
+            _compute_nxing_pattern(C, H, L, O, V, code)
+        sig["nxing_pattern"] = nxing_pattern
+        sig["nxing_hhvbars"] = nxing_hhvbars
+        sig["nxing_hhv"] = nxing_hhv
+        sig["nxing_rise_low"] = nxing_rise_low
+
+    pattern_full = sig["nxing_pattern"]
+    hhvbars_full = sig["nxing_hhvbars"]
+    hhv_full = sig["nxing_hhv"]
+    rise_low_full = sig["nxing_rise_low"]
+    L_full = sig.get("low")
+
+    s = slice(i_start, i_end + 1)
+    pattern_s = pattern_full[s]
+    if not np.any(pattern_s):
+        return
+
+    hhvbars_s = hhvbars_full[s]
+    hhv_s = hhv_full[s]
+    rise_low_s = rise_low_full[s]
+    L_s = L_full[s] if L_full is not None else None
+    n_s = len(pattern_s)
+
+    # 找连续的pattern区间
+    groups = []
+    in_group = False
+    for i in range(n_s):
+        if pattern_s[i]:
+            if not in_group:
+                group_start = i
+                in_group = True
+        else:
+            if in_group:
+                groups.append((group_start, i - 1))
+                in_group = False
+    if in_group:
+        groups.append((group_start, n_s - 1))
+
+    # 按高点位置去重，每个唯一高点只画一次
+    seen_highs = set()
+    for g_start, g_end in groups:
+        ref_j = g_start
+        high_offset = int(hhvbars_s[ref_j])
+        high_x = ref_j - high_offset
+
+        if high_x < 0 or high_x in seen_highs:
+            continue
+        seen_highs.add(high_x)
+
+        high_price = float(hhv_s[ref_j])
+        low_price = float(rise_low_s[ref_j])
+
+        # 找拉升起点（高点前15根内的最低点）
+        rise_x = max(0, high_x - 10)
+        if L_s is not None and high_x > 2:
+            search_start = max(0, high_x - 15)
+            search_end = max(0, high_x)
+            if search_end > search_start:
+                window = L_s[search_start:search_end + 1]
+                if len(window) > 0:
+                    rise_x = search_start + int(np.argmin(window))
+
+        pullback_end_x = g_end
+
+        # 绘制拉升阶段背景（绿色）
+        if high_x > rise_x:
+            ax.axvspan(rise_x - 0.5, high_x + 0.5, alpha=0.12,
+                       color=COLOR_NXING_RISE, zorder=0)
+
+        # 绘制回调阶段背景（橙色）
+        if pullback_end_x >= high_x:
+            ax.axvspan(high_x - 0.5, pullback_end_x + 0.5, alpha=0.12,
+                       color=COLOR_NXING_PULLBACK, zorder=0)
+
+        # 标记高点
+        if 0 <= high_x < n_s:
+            ax.plot(high_x, high_price, marker="D", color=COLOR_NXING_HIGH,
+                    markersize=8, markeredgecolor="white", markeredgewidth=1, zorder=6)
+            ax.annotate(f"N高 {high_price:.2f}",
+                        xy=(high_x, high_price),
+                        xytext=(8, 10), textcoords="offset points",
+                        fontsize=7, color=COLOR_NXING_HIGH, fontweight="bold",
+                        bbox=dict(boxstyle="round,pad=0.2", fc="white",
+                                  ec=COLOR_NXING_HIGH, alpha=0.85))
+
+        # 标记低点
+        if 0 <= rise_x < n_s:
+            ax.plot(rise_x, low_price, marker="D", color=COLOR_NXING_LOW,
+                    markersize=6, markeredgecolor="white", markeredgewidth=1, zorder=6)
+            ax.annotate(f"N低 {low_price:.2f}",
+                        xy=(rise_x, low_price),
+                        xytext=(-8, -14), textcoords="offset points",
+                        fontsize=7, color=COLOR_NXING_LOW, fontweight="bold",
+                        bbox=dict(boxstyle="round,pad=0.2", fc="white",
+                                  ec=COLOR_NXING_LOW, alpha=0.85))
 
 
 def _find_range(dates, first_date, last_date, padding):

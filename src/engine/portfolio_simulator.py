@@ -401,6 +401,15 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
+            # 1.5 跌破黄线清仓（无条件）
+            if price < yellow_val:
+                cur_idx = self._td_index.get(date)
+                if cur_idx is not None:
+                    self._cooldown[code] = cur_idx
+                self._sell_position(code, pos, price, date, "跌破黄线清仓")
+                to_remove.append(code)
+                continue
+
             # 2. T+N 没涨清仓（基于摊薄成本价判断）
             if days_held >= self._t_plus_n and price <= avg_cost:
                 cur_idx = self._td_index.get(date)

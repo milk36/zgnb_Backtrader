@@ -107,7 +107,8 @@ def _compute_nxing_pattern(C, H, L, O, V, code):
 
     n = len(C)
     if n < 65:
-        return np.zeros(n, dtype=bool)
+        return (np.zeros(n, dtype=bool), np.zeros(n, dtype=int),
+                np.full(n, np.nan), np.full(n, np.nan))
 
     REFC = REF(C, 1)
     REFH = REF(H, 1)
@@ -156,8 +157,9 @@ def _compute_nxing_pattern(C, H, L, O, V, code):
     amplitude = np.where(REFC > 0, (H - L) / REFC * 100, 0)
     narrow = _every(amplitude <= MAX_AMPLITUDE_PCT, 5)
 
-    return (high_ok & rise_ok & vol_ok & no_gap_limit & high_no_vol
-            & in_pullback & pullback_shrink & deep_pullback & narrow)
+    pattern = (high_ok & rise_ok & vol_ok & no_gap_limit & high_no_vol
+               & in_pullback & pullback_shrink & deep_pullback & narrow)
+    return pattern, hhvbars_20, hhv_20, rise_low
 
 
 # ================================================================== #
@@ -179,7 +181,15 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     jinzhuan_ok = signals["jinzhuan_ok"]
 
     # N型拉升形态过滤
-    nxing_pattern = _compute_nxing_pattern(C, H, L, O, V, code)
+    nxing_pattern, nxing_hhvbars, nxing_hhv, nxing_rise_low = _compute_nxing_pattern(C, H, L, O, V, code)
+    # N型拉升形态过滤（已屏蔽）
+    # nxing_pattern = np.ones(len(C), dtype=bool)
+
+    # 存储N型图表数据
+    signals["nxing_pattern"] = nxing_pattern
+    signals["nxing_hhvbars"] = nxing_hhvbars
+    signals["nxing_hhv"] = nxing_hhv
+    signals["nxing_rise_low"] = nxing_rise_low
 
     # 流通市值过滤
     capital_shares = params.get("capital_shares")
