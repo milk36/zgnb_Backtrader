@@ -71,7 +71,7 @@ MACD 参数由 `config.py` 配置：`MARKET_MACD_FAST=12`, `MARKET_MACD_SLOW=26`
 - 缩量快速拉升检测逻辑：涨幅 > `HUANGBAI_SURGE_PRICE_PCT`(15%) 且 近期均量/长期均量 < `HUANGBAI_SURGE_VOL_RATIO`(0.7) 时排除
 - 连续涨停缩量排除：前期连续2天涨停且成交量递减则直接剔除（主板10%/科创板20%涨停阈值）
 - 连续上涨后放量下跌排除：近N天下跌日总成交量 > 上涨日总成交量则剔除（出货特征）
-- S1/大风车排除（V1/V2 三处同步：`indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`）：近 `HUANGBAI_S1_PERIOD`(20) 天内出现 S1（加速上涨+天量+大阴线）或大风车（加速上涨+历史天量+长上下影阴线+阴量）则排除，OR 关系
+- S1/大风车/长上影线排除（V1/V2 三处同步：`indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`）：近 `HUANGBAI_S1_PERIOD`(20) 天内出现 S1（加速上涨+天量+大阴线）或大风车（加速上涨+历史天量+长上下影阴线+阴量）或前期高点长上影线（C>=HHV(C,20)*0.97 + 上影线>3% + 上影线>实体*2 + 量>前日*1.3）则排除，OR 关系
 - S1 天量判定新增涨停后替代条件：近3日有涨停(`EXIST(limit_up,3)`)时，量能只需 > 前日量*1.5 即判定天量，解决连续涨停拉高 `HHV(V,20)` 基线导致漏检的问题
 - 单股回测时 V2 自动加载大盘指数作为第二数据源（`data1`），加载失败则跳过大盘过滤并打印警告
 - `scan_all()` 返回元组 `(results, market_macd_ok)`，与 V1 的 `results` 不同，调用方需注意解包

@@ -476,7 +476,10 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
         _hist_vol = V == HHV(V, 120)
         _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
-        no_s1_dafengche = ~EXIST(_s1 | _dafengche, _s1p)
+        _near_high = C >= HHV(C, 20) * 0.97
+        _upper_pct = _upper_shadow / np.maximum(C, 0.001) * 100
+        _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
+        no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow, _s1p)
         self._vol_expand_ok = (has_vol_expand & no_shrinkage_surge
                                & no_consec_limit_shrink & no_heavy_decline
                                & no_s1_dafengche)
@@ -866,7 +869,10 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
     _hist_vol = V == HHV(V, 120)
     _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
-    no_s1_dafengche = not EXIST(_s1 | _dafengche, _s1p)[i]
+    _near_high = C >= HHV(C, 20) * 0.97
+    _upper_pct = _upper_shadow / np.maximum(C, 0.001) * 100
+    _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
+    no_s1_dafengche = not EXIST(_s1 | _dafengche | _long_upper_shadow, _s1p)[i]
     vol_expand_ok = (has_vol_expand and no_shrinkage_surge
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
@@ -1347,7 +1353,10 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _long_shadow_yin = (C < O) & ((_upper_shadow + _lower_shadow) > _body * 2)
     _hist_vol = V == HHV(V, 120)
     _dafengche = _accel & _hist_vol & _long_shadow_yin & (V > REF(V, 1))
-    no_s1_dafengche = ~EXIST(_s1 | _dafengche, _s1p)
+    _near_high = C >= HHV(C, 20) * 0.97
+    _upper_pct = _upper_shadow / np.maximum(C, 0.001) * 100
+    _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
+    no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow, _s1p)
     vol_expand_ok = (has_vol_expand & no_shrinkage_surge
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)
