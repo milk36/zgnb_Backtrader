@@ -314,6 +314,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     pb_shrink = (V < hhv_v20 * 0.45) | (V < hhv_v50 / 3)
     mod_shrink = (V < hhv_v20 * 0.618) | (V < hhv_v50 / 3)
     sup_shrink = (V < HHV(V, 30) / 4) | (V < hhv_v50 / 6)
+    prev_shrink = REF(shrink.astype(float), 1) == 1
 
     # 趋势状态
     uptrend = ((white >= yellow * 0.999)
@@ -476,8 +477,28 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     limit_threshold = 1.139 if is_tech else 1.069
     non_limit_up = C / np.where(REFC > 0, REFC, 0.001) < limit_threshold
 
+    # ---- 砖块买入附加条件 ----
+    # 前期涨幅>100%且近期横盘
+    hhv_120 = HHV(H, 120)
+    llv_120 = LLV(L, 120)
+    prior_gain_100 = (hhv_120 - llv_120) / np.maximum(llv_120, 0.001) > 1.0
+    consolidating = (HHV(H, 20) - LLV(L, 20)) / np.maximum(LLV(L, 20), 0.001) < 0.20
+    high_gain_consol = prior_gain_100 & consolidating
+
+    # 前期大涨横盘需当日放量，其他需前日缩量
+    vol_expand_today = V > REFV * 1.5
+    vol_context = np.where(high_gain_consol, vol_expand_today, prev_shrink)
+
+    # 砖大、涨幅小、量能大
+    vol_ma5 = MA(V, 5)
+    brick_big = brick > 3
+    pct_small = (pct_chg > 0) & (pct_chg < 5.0)
+    vol_large = V > vol_ma5
+    brick_quality = brick_big & pct_small & vol_large
+
     jinzhuan_ok = (resonance & upper_shadow_cond & trend_cond
-                   & turnover_cond & non_limit_up)
+                   & turnover_cond & non_limit_up
+                   & vol_context & brick_quality)
 
     # ============================================================ #
     #  筹码密集过滤（COST近似）                                       #

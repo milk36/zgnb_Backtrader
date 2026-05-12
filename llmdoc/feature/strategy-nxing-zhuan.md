@@ -74,6 +74,7 @@ N型砖复用 `DongnengZhuanSimulator`，通过参数差异化：
 
 - N型砖不支持单股 Backtrader 回测（STRATEGIES 字典中值为 None）
 - 信号计算依赖动能砖的 `_compute_all_bar_signals`，金砖引擎的任何修改会同时影响两个策略
+- `jinzhuan_ok` 现包含三个附加条件：前一日缩量(`prev_shrink`)、前期大涨横盘放量替代(`high_gain_consol`+`vol_expand_today`)、砖块质量(`brick_quality`：砖大+涨幅小+量能大)
 - `NXZH_MINUTE_ENTRY_ENABLED=False` 是与动能砖的核心差异，模拟器中 `_execute_pending_buys` 将直接以日线开盘价买入
 - `NXZH_MIN_MARKET_CAP` 使用独立参数而非 `DNZH_MIN_MARKET_CAP`，两者可独立调整
 - 退出逻辑完全由模拟器控制，五级退出优先级与动能砖相同（止损→涨停清仓→涨幅2%卖1/4→T+N不拉升→盈利止盈）
