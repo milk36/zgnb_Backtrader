@@ -539,6 +539,7 @@ class HuangBaiB1V4Strategy(BaseStrategy):
             "white": self._white[idx],
             "yellow": self._yellow[idx],
             "bar": len(self),
+            "bought_below_yellow": self.data.close[0] < self._yellow[idx],
         }
         self.stop_loss_price = sl
         self.hold_until_below_white = False
@@ -567,8 +568,8 @@ class HuangBaiB1V4Strategy(BaseStrategy):
             self._reset_position_state()
             return
 
-        # 1.5 跌破黄线清仓
-        if price < self._yellow[idx]:
+        # 1.5 跌破黄线清仓（黄线以下建仓时跳过）
+        if price < self._yellow[idx] and not self.buy_info.get("bought_below_yellow"):
             self.order = self.order_target_percent(target=0.0)
             self._last_sl_bar = len(self)
             self.log(f"跌破黄线清仓 @ {price:.2f}  盈亏={pct_gain:+.2f}%")

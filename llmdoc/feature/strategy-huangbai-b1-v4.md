@@ -78,6 +78,7 @@ V2 策略的变体版本，**移除黄白线金叉条件**，新增**60日动能
 - B1 逻辑变更需同步三个位置：`HuangBaiB1V4Strategy.indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`（与 V1/V2 相同的三处同步问题）
 - 动能信号逻辑变更需同步三处中的 `_compute_dongneng_ok()` 调用。`_compute_dongneng_ok()` 本身是独立函数，三处共用
 - V4 代码独立于 V2 文件，不共享函数引用。V2 的 B1 逻辑变更不会自动同步到 V4，需手动维护
+- S1 天量判定新增涨停后替代条件（同V1/V2）：近3日有涨停时量能只需 > 前日量*1.5，解决连续涨停拉高HHV基线问题
 - `_compute_dongneng_ok()` 不含流通市值过滤（`dongneng_zhuan_strategy` 中的 `liutong_mask` 在 V4 中省略）
 - `preload_all_signals()` 返回三元组，调用方需注意解包
 - V4 不支持 `skip_gc` 参数（金叉条件已移除，该参数无意义）

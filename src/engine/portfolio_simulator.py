@@ -401,8 +401,8 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 1.5 跌破黄线清仓（无条件）
-            if price < yellow_val:
+            # 1.5 跌破黄线清仓（黄线以下建仓时跳过）
+            if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy):
                 cur_idx = self._td_index.get(date)
                 if cur_idx is not None:
                     self._cooldown[code] = cur_idx
