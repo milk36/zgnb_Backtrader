@@ -22,6 +22,7 @@ from config import (
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
     NXZH_MIN_MARKET_CAP,
+    NXZH_N_LOOKBACK,
 )
 from src.strategies.dongneng_zhuan_strategy import (
     _compute_all_bar_signals as _dnzh_compute,
@@ -87,17 +88,17 @@ def _compute_nxing_pattern(C, H, L, O, V, code):
     """N型缩量回调形态检测（向量化）
 
     基于通达信选股公式（N型上涨-缩量深回调+窄幅整理+市值筛选）:
-    1. 近20日存在高点（距今日>=5天）
+    1. 近N日存在高点（距今日>=5天）
     2. 高点前10日内有起涨低点，涨幅15%-50%
     3. 上涨段量能放大（10日均量 > 前期10日均量 × 1.5）
-    4. 20日内无跳空涨停（排除无量一字板拉升）
+    4. N日内无跳空涨停（排除无量一字板拉升）
     5. 高点当日未放量（量 < 上涨段最大量 × 0.9）
     6. 当前处于回调（收盘低于高点且高于起涨点）
     7. 回调缩量（5日均量 < 上涨段均量 × 0.8）
     8. 回调幅度 >= 15%
     9. 近5日窄幅整理（单日振幅 <= 10%）
     """
-    N_LOOKBACK = 20
+    N_LOOKBACK = NXZH_N_LOOKBACK
     MIN_RISE_PCT = 15
     MAX_RISE_PCT = 50
     VOL_RATIO = 1.5

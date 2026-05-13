@@ -83,6 +83,7 @@ NXZH_MINUTE_ENTRY_ENABLED = True     # 启用分钟级入场确认
 NXZH_MINUTE_EXIT_ENABLED = True      # 启用分钟级止损/涨停检查
 NXZH_BRICK_GREEN_EXIT = True         # 持仓中红砖变绿砖则清仓
 NXZH_LIMIT_UP_EXIT = False           # 涨停清仓 / 累计盈利≥10%清仓（N型砖禁用）
+NXZH_N_LOOKBACK = 15                 # N型拉升形态：近期搜索周期（高点发生在最近N天内）
 
 # 金砖组合模拟参数
 JZH_INITIAL_CASH = 100_000           # 10万
