@@ -16,6 +16,7 @@
 | `huangbai_v3` | 黄白线 B1 V3 | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `dongneng_zhuan` | 动能+砖 | 组合模拟（默认）/ 仅扫描 |
 | `nxing_zhuan` | N型+砖 | 组合模拟（默认）/ 仅扫描 |
+| `huangbai_b2` | B2 倍量柱 | 组合模拟（默认）/ 仅扫描 |
 
 ### 运行模式
 
@@ -52,11 +53,22 @@
 
 注意：`nxing_zhuan` 不支持 `--symbol` 单股回测、不需要 `--portfolio` 标志。
 
+#### B2 倍量柱（`huangbai_b2`）
+
+默认直接进入组合级模拟（无需 `--portfolio`），支持 2 种运行模式：
+
+| 模式 | 触发参数 | 说明 |
+|------|----------|------|
+| 组合级模拟 | 无需额外参数（默认） | 前日B1 + 当日倍量柱入场，大盘MACD过滤，标准六级退出（100万/10只/每只10万） |
+| 仅扫描选股 | `--scan` 或 `--scan-only` | 全市场扫描B2倍量柱选股，按缩量排序输出 |
+
+注意：`huangbai_b2` 不支持 `--symbol` 单股回测，不需要 `--portfolio` 标志。
+
 ### 完整参数表
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `dongneng_zhuan` / `nxing_zhuan` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `dongneng_zhuan` / `nxing_zhuan` / `huangbai_b2` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -147,6 +159,22 @@ python main.py --strategy nxing_zhuan --scan-only
 python main.py --strategy nxing_zhuan --chart
 ```
 
+#### B2 倍量柱策略
+
+```bash
+# 组合级模拟（默认模式，无需 --portfolio）
+python main.py --strategy huangbai_b2
+
+# 自定义回测区间
+python main.py --strategy huangbai_b2 --start 2024-06-01 --end 2025-12-31
+
+# 全市场扫描选股
+python main.py --strategy huangbai_b2 --scan-only
+
+# 组合级模拟 + K线图
+python main.py --strategy huangbai_b2 --chart
+```
+
 #### 前复权缓存管理
 
 ```bash
@@ -195,6 +223,15 @@ python main.py --strategy kdj --symbol 600036
 - **退出参数**：`NXZH_T_PLUS_N=2`（不拉升天数）、`NXZH_MAX_HOLD_DAYS=6`（盈利后最大持仓）、`NXZH_PROFIT_PCT=5.0`（脱离成本区%），均可在 `config.py` 调整
 - **入场模式**：`NXZH_MINUTE_ENTRY_ENABLED=False`，T+1日线开盘买入（无分钟确认），与动能砖的核心区别
 
+#### B2 倍量柱参数
+
+- **无需 `--portfolio`**：默认即组合级模拟
+- **不支持 `--symbol`**：仅支持全市场扫描模式
+- **`--stock-type`**：同黄白线系列，影响振幅阈值、中阳判断、涨停板计算
+- **资金/仓位**：复用 `PORTFOLIO_INITIAL_CASH=100万`、`PORTFOLIO_MAX_POSITIONS=10`、`PORTFOLIO_PER_POSITION=10万`，来自 `config.py`
+- **退出逻辑**：复用 PortfolioSimulator 标准六级退出（止损→T+N→盈利100%→半仓持股→涨停卖半→中阳卖1/3）
+- **大盘MACD过滤**：同V2，空头日只卖不买
+
 ## 3. Relevant Code Modules
 
 - `main.py` - CLI 入口，`parse_args()` 参数定义与模式分发逻辑
@@ -209,3 +246,4 @@ python main.py --strategy kdj --symbol 600036
 - 组合模拟分两阶段执行：阶段 1 预加载全市场信号（约 45-55 秒），阶段 2 逐日模拟
 - `dongneng_zhuan` 不支持单股 Backtrader 回测（STRATEGIES 字典中值为 None）
 - `nxing_zhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
+- `huangbai_b2` 同样不支持单股回测（STRATEGIES 字典中值为 None）

@@ -102,6 +102,11 @@ JZH_MINUTE_EXIT_ENABLED = True       # 启用分钟级止损/涨停检查
 JZH_BRICK_GREEN_EXIT = True          # 持仓中红砖变绿砖则清仓
 JZH_LIMIT_UP_EXIT = True             # 涨停清仓 / 累计盈利≥10%清仓
 
+# B2倍量柱策略参数
+B2_VOL_RATIO = 1.8                    # 倍量柱量比阈值（当天量 > 前一天量 × 此值）
+B2_VOL_AVG_PERIOD = 40                # 均量线周期（MA(VOL, 40)）
+B2_MIN_MARKET_CAP = 50.0              # 流通市值最低阈值（亿元，0=不过滤）
+
 # 前复权
 QFQ_CACHE_ENABLED = True
 QFQ_CACHE_DIR = "cache/qfq"

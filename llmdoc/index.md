@@ -11,6 +11,7 @@
 - [策略层：黄白线金叉后B1策略 V3](feature/strategy-huangbai-b1-v3.md): B1 买入信号替换为通达信原始选股公式（单一复合条件取代7子条件），止盈止损逻辑与V1/V2完全相同。B1通过共享函数统一三处调用，消除手动同步问题。
 - [策略层：黄白线B1策略 V4](feature/strategy-huangbai-b1-v4.md): V2 的变体版本，移除黄白线金叉条件，新增60日动能信号过滤（综合天命打分+阵营过滤+硬性过滤，复用动能砖策略核心逻辑，不含流通市值过滤）。保留大盘MACD过滤、周线多头、B1七子条件、vol_expand_ok过滤链和动量持股逻辑。`recent_gc` 返回全True数组以兼容 PortfolioSimulator。
 - [策略层：黄白线B1策略 V5（战法退出逻辑）](feature/strategy-huangbai-b1-v5.md): 买入逻辑与 V2 完全相同，退出逻辑全部重写为文章战法的六级退出体系（硬止损→放量跌停→S1信号→两根中阴线→白线次日确认→放飞减仓）。引入关键K支撑、缩量不卖保护、加速检测等新概念，移除T+N、盈利100%清仓、动量持股、半仓持股等V2出场机制。PortfolioSimulator 新增 `_check_exits_v5` 专用退出路径。
+- [策略层：黄白线B2倍量柱策略](feature/strategy-huangbai-b2.md): 包装V4信号计算，将B1入场替换为"前日B1+当日倍量柱"时序联动条件，移除动能过滤。倍量柱定义：VOL>1.8*REF(VOL,1) AND C>O AND VOL>MA(VOL,40) 且首次出现。复用PortfolioSimulator标准六级退出，100万/10只。理解B2包装架构或倍量柱逻辑时参考。
 - [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装（单股回测）；PortfolioSimulator 组合级日频模拟引擎（100万/10只/每只10万）。理解回测执行流程时参考。
 - [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。
 - [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系。运行回测时首先阅读此文档。
