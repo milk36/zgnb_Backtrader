@@ -69,6 +69,7 @@ from src.strategies.dongneng_zhuan_strategy import scan_all as scan_all_dnzh
 from src.strategies.nxing_zhuan_strategy import scan_all as scan_all_nxzh
 from src.strategies.jinzhuan_strategy import scan_all as scan_all_jzh
 from src.strategies.huangbai_b2_strategy import scan_all as scan_all_b2
+from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -81,6 +82,7 @@ STRATEGIES = {
     "nxing_zhuan": None,     # 仅支持组合级模拟，不支持单股回测
     "jinzhuan": None,        # 仅支持组合级模拟，不支持单股回测
     "huangbai_b2": None,     # B2倍量柱：仅支持组合级模拟+扫描
+    "huangbai_b2_v2": None,  # B2_V2倍量柱：30日B1频次过滤，仅支持组合级模拟+扫描
 }
 
 
@@ -413,6 +415,62 @@ def main():
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file,
                                         strategy_tag="[B2]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        return
+
+    # ---- B2_V2 倍量柱策略（30日B1频次过滤） ----
+    if args.strategy == "huangbai_b2_v2":
+        if args.scan or args.scan_only:
+            print("=" * 55)
+            print("  B2_V2: 倍量柱 全市场选股扫描")
+            print("  条件: 30日≥2次B1(间隔≥5天) + 前日B1 + 当日倍量柱 + vol_expand_ok")
+            print("=" * 55)
+            scan_all_b2v2(stock_type=args.stock_type)
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.huangbai_b2_v2_strategy import preload_all_signals as preload_b2v2
+
+        print("=" * 55)
+        print("  B2_V2: 30日B1频次 + 大盘MACD + 前日B1 + 当日倍量柱")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days, market_macd_bullish = preload_b2v2(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: B2_V2组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
+              f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
+              f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PORTFOLIO_INITIAL_CASH,
+            max_positions=PORTFOLIO_MAX_POSITIONS,
+            per_position_cash=PORTFOLIO_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[B2_V2]")
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[B2_V2]")
 
         if args.chart:
             from src.charting import generate_charts
