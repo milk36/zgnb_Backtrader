@@ -88,13 +88,15 @@ def _compute_beiliangzhu(V, C, O):
 # ================================================================== #
 
 
-def _compute_b1_count_filter(b1_array, lookback=B2_V2_B1_LOOKBACK,
+def _compute_b1_count_filter(b1_array, close, lookback=B2_V2_B1_LOOKBACK,
                              min_count=B2_V2_B1_MIN_COUNT,
                              min_gap=B2_V2_B1_MIN_GAP):
     """30日B1频次过滤
 
-    条件：最近lookback个交易日内至少有min_count个B1信号，
-    且存在两次B1信号间隔 >= min_gap个交易日。
+    条件：
+    1. 最近lookback个交易日内至少有min_count个B1信号
+    2. 存在两次B1信号间隔 >= min_gap个交易日
+    3. 最近一次B1的收盘价高于之前B1的收盘价（价格抬升）
     """
     n = len(b1_array)
     result = np.zeros(n, dtype=bool)
@@ -102,10 +104,18 @@ def _compute_b1_count_filter(b1_array, lookback=B2_V2_B1_LOOKBACK,
     for i in range(lookback - 1, n):
         window = b1_array[i - lookback + 1:i + 1]
         b1_indices = np.where(window)[0]
-        if len(b1_indices) >= min_count:
-            gaps = np.diff(b1_indices)
-            if len(gaps) > 0 and np.max(gaps) >= min_gap:
-                result[i] = True
+        if len(b1_indices) < min_count:
+            continue
+        # 检查间隔：任意两次相邻B1间隔 >= min_gap
+        gaps = np.diff(b1_indices)
+        if len(gaps) == 0 or np.max(gaps) < min_gap:
+            continue
+        # 检查价格抬升：最近B1价格 > 之前B1价格
+        last_b1_idx = b1_indices[-1]
+        prev_b1_indices = b1_indices[:-1]
+        last_price = close[i - lookback + 1 + last_b1_idx]
+        if np.any(close[i - lookback + 1 + prev_b1_indices] < last_price):
+            result[i] = True
 
     return result
 
@@ -131,7 +141,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     b1_original = signals["b1"].copy()
 
     # 30日B1频次过滤
-    b1_count_ok = _compute_b1_count_filter(b1_original)
+    b1_count_ok = _compute_b1_count_filter(b1_original, C)
 
     # 前一天B1
     prev_b1 = np.roll(b1_original, 1)

@@ -142,8 +142,8 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     # 绘制N型阶段标注
     _draw_nxing_phases(ax_price, sig, i_start, i_end, code=code)
 
-    # 绘制B1信号标记
-    b1_full = sig.get("b1")
+    # 绘制B1信号标记（B2策略会覆写b1为入场信号，原始B1保存在b1_original）
+    b1_full = sig.get("b1_original") if sig.get("b1_original") is not None else sig.get("b1")
     b1_s = b1_full[s] if b1_full is not None else None
     _draw_b1_markers(ax_price, x, b1_s, L_s)
 
@@ -337,12 +337,15 @@ def _draw_b1_markers(ax, x, b1, lows):
     """在K线下方标注B1信号点（洋红色五角星）"""
     if b1 is None or not np.any(b1):
         return
+    # 根据Y轴范围计算偏移量，确保标记在K线下方
+    ylim = ax.get_ylim()
+    offset = (ylim[1] - ylim[0]) * 0.03
     for i in range(len(b1)):
         if b1[i]:
             y = float(lows[i])
             if np.isnan(y):
                 continue
-            ax.plot(x[i], y, marker="*", color=COLOR_B1,
+            ax.plot(x[i], y - offset, marker="*", color=COLOR_B1,
                     markersize=10, markeredgecolor="white", markeredgewidth=0.5,
                     zorder=4)
 
