@@ -14,7 +14,7 @@
 - [策略层：黄白线B2倍量柱策略](feature/strategy-huangbai-b2.md): 包装V4信号计算，将B1入场替换为"前日B1+当日倍量柱"时序联动条件，移除动能过滤。倍量柱定义：VOL>1.8*REF(VOL,1) AND C>O AND VOL>MA(VOL,40) 且首次出现。复用PortfolioSimulator标准六级退出，100万/10只。理解B2包装架构或倍量柱逻辑时参考。
 - [策略层：黄白线B2_V2倍量柱策略](feature/strategy-huangbai-b2-v2.md): B2增强版，新增30日B1频次过滤（至少2次B1信号且间隔≥5天），排序改为缩量升序+流动市值降序并只取前1支。其余架构与B2一致（包装V4、倍量柱入场、复用六级退出）。
 - [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装（单股回测）；PortfolioSimulator 组合级日频模拟引擎（100万/10只/每只10万）。理解回测执行流程时参考。
-- [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。
+- [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+B1信号标记+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。
 - [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系。运行回测时首先阅读此文档。
 
 - [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛→筹码密集过滤的串行过滤策略，包含综合天命打分、阵营过滤、流通市值过滤、砖型图强红共振（含前日缩量/大涨横盘放量/砖块质量三个附加条件）、60日VWAP筹码密集、T+1开盘买入及三级退出逻辑。

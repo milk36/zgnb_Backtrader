@@ -24,12 +24,13 @@ python main.py --strategy huangbai_v3 --portfolio --chart
 |------|------|
 | `generate_charts(trade_list, all_signals, output_dir)` | 按 code 分组交易，为每只股票调用 `_plot_single_stock()` |
 | `_plot_single_stock(code, sig, trades, output_dir)` | 绘制单只股票的完整 K 线图（价格轴 + 成交量轴） |
+| `_draw_b1_markers(ax, x, b1, lows)` | 在 K 线最低价下方绘制 B1 信号标记（洋红色五角星 `*`），`b1` 为 None 或全 False 时跳过 |
 
 ### 图表结构
 
 双面板布局（gridspec `height_ratios=[3,1]`）：
 
-- **上方价格面板**：K 线蜡烛图 + 白线/黄线/BBI 指标线 + 买卖标记 + 止损线（橙色虚线）+ 成本线（蓝色点线）
+- **上方价格面板**：K 线蜡烛图 + 白线/黄线/BBI 指标线 + B1 信号标记（洋红色五角星）+ 买卖标记 + 止损线（橙色虚线）+ 成本线（蓝色点线）
 - **下方成交量面板**：成交量柱状图，阳线红/阴线绿
 
 ### 数据依赖
@@ -43,6 +44,7 @@ python main.py --strategy huangbai_v3 --portfolio --chart
 | `open` | 否（fallback close） | 开盘价，用于绘制蜡烛实体 |
 | `volume` | 否（fallback zeros） | 成交量，用于绘制成交量面板 |
 | `white`, `yellow`, `bbi` | 否 | 指标线，缺失则不绘制 |
+| `b1` | 否 | B1 信号布尔数组，为 True 时在该 bar 最低价下方绘制洋红色五角星标记 |
 
 `open` 和 `volume` 字段由 `_compute_all_bar_signals()` 在返回字典中提供。V1/V3 策略已新增这两个字段，V2 策略原本就包含。
 
@@ -50,6 +52,7 @@ python main.py --strategy huangbai_v3 --portfolio --chart
 
 - 图表背景：白色（`ax.set_facecolor("white")`）
 - 影线颜色：灰色（`#888888`）
+- B1 信号标记：洋红色五角星（`#ff00ff`，`marker="*"`），仅当 `b1` 数组存在且含 True 值时显示图例
 - 图例背景：白色（`facecolor="white"`）
 - 输出目录：`charts/`，文件名格式 `{code}_{start}_{end}.png`
 

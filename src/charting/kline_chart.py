@@ -31,6 +31,7 @@ COLOR_STOP_LOSS = "#ff6600"  # 止损线橙
 COLOR_COST = "#00ccff"    # 成本线蓝
 COLOR_NXING_HIGH = "#ff0000"    # N型高点标记红
 COLOR_NXING_LOW = "#00aa00"     # N型低点标记绿
+COLOR_B1 = "#ff00ff"       # B1信号标记（洋红）
 COLOR_NXING_RISE = "#00cc00"    # N型拉升阶段背景
 COLOR_NXING_PULLBACK = "#ff8800"  # N型回调阶段背景
 DPI = 150
@@ -141,6 +142,11 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     # 绘制N型阶段标注
     _draw_nxing_phases(ax_price, sig, i_start, i_end, code=code)
 
+    # 绘制B1信号标记
+    b1_full = sig.get("b1")
+    b1_s = b1_full[s] if b1_full is not None else None
+    _draw_b1_markers(ax_price, x, b1_s, L_s)
+
     # 绘制买卖标记
     _draw_trade_markers(ax_price, x, dates_s, trades)
 
@@ -196,6 +202,9 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
                                     linestyle="None", markersize=8, label="买入"))
     legend_items.append(plt.Line2D([0], [0], marker="v", color=COLOR_SELL,
                                     linestyle="None", markersize=8, label="清仓卖出"))
+    if b1_s is not None and np.any(b1_s):
+        legend_items.append(plt.Line2D([0], [0], marker="*", color=COLOR_B1,
+                                        linestyle="None", markersize=8, label="B1信号"))
     legend_items.append(plt.Line2D([0], [0], marker="v", color=COLOR_SELL_PARTIAL,
                                     linestyle="None", markersize=6, label="部分卖出"))
     legend_items.append(plt.Line2D([0], [0], color=COLOR_STOP_LOSS,
@@ -322,6 +331,20 @@ def _draw_indicators(ax, x, white, yellow, bbi):
     if bbi is not None:
         valid = ~np.isnan(bbi)
         ax.plot(x[valid], bbi[valid], color=COLOR_BBI, linewidth=0.8, alpha=0.8)
+
+
+def _draw_b1_markers(ax, x, b1, lows):
+    """在K线下方标注B1信号点（洋红色五角星）"""
+    if b1 is None or not np.any(b1):
+        return
+    for i in range(len(b1)):
+        if b1[i]:
+            y = float(lows[i])
+            if np.isnan(y):
+                continue
+            ax.plot(x[i], y, marker="*", color=COLOR_B1,
+                    markersize=10, markeredgecolor="white", markeredgewidth=0.5,
+                    zorder=4)
 
 
 def _draw_trade_markers(ax, x, dates_s, trades):

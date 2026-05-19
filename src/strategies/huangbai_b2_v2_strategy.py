@@ -7,7 +7,7 @@
 4. 前一天有B1信号 + 当天有倍量柱信号（B2核心入场条件）
 5. vol_expand_ok 五重过滤链
 6. 组合级模拟：100万/10只/每只10万
-7. 排序：缩量升序 + 流动市值降序，取前1支
+7. 排序：缩量升序 + 涨幅接近4.5%，取前1支
 
 倍量柱定义（通达信公式）：
   AVG40 := MA(VOL, 40);
@@ -99,8 +99,8 @@ def _compute_b1_count_filter(b1_array, lookback=B2_V2_B1_LOOKBACK,
     n = len(b1_array)
     result = np.zeros(n, dtype=bool)
 
-    for i in range(lookback, n):
-        window = b1_array[i - lookback:i + 1]
+    for i in range(lookback - 1, n):
+        window = b1_array[i - lookback + 1:i + 1]
         b1_indices = np.where(window)[0]
         if len(b1_indices) >= min_count:
             gaps = np.diff(b1_indices)
@@ -299,6 +299,7 @@ def scan_all(stock_type="main", skip_weekly=False,
 
     # 取前1支
     top1 = results[:1]
+    top1_code = top1[0]["code"] if top1 else None
 
     print(f"\n{'=' * 55}")
     print(f"  B2_V2扫描完成: {total} 只  命中 {len(results)} 只  "
@@ -311,7 +312,7 @@ def scan_all(stock_type="main", skip_weekly=False,
         print(f"\n  选股结果（按缩量升序 + 涨幅接近4.5%排序）")
         print(f"{'=' * 55}")
         for r in results:
-            tag = " <<< TOP1" if r == top1[0] else ""
+            tag = " <<< TOP1" if r["code"] == top1_code else ""
             pct = r.get("daily_pct", 0.0)
             print(f"  {r['code']}  C={r['close']:.2f}  "
                   f"涨幅={pct:.1f}%  缩量={r['shrink_score']:.3f}{tag}")
