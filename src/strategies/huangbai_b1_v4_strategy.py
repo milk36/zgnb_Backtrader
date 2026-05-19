@@ -37,6 +37,7 @@ from config import (
     HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN,
     HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
     HUANGBAI_S1_PERIOD,
+    HUANGBAI_S1_HIGH_PERIOD, HUANGBAI_S1_HIGH_RATIO,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
     DNZH_MIN_MARKET_CAP,
 )
@@ -469,7 +470,8 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _recent_limit = EXIST(_limit_up, 3)
         _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
         _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
-        _s1 = _accel & _big_vol & _big_yin
+        _at_high = C >= HHV(C, HUANGBAI_S1_HIGH_PERIOD) * HUANGBAI_S1_HIGH_RATIO
+        _s1 = _accel & _big_vol & _big_yin & _at_high
         _upper_shadow = H - np.maximum(O, C)
         _lower_shadow = np.minimum(O, C) - L
         _body = ABS(C - O)
@@ -862,7 +864,8 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _recent_limit = EXIST(_limit_up, 3)
     _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
-    _s1 = _accel & _big_vol & _big_yin
+    _at_high = C >= HHV(C, HUANGBAI_S1_HIGH_PERIOD) * HUANGBAI_S1_HIGH_RATIO
+    _s1 = _accel & _big_vol & _big_yin & _at_high
     _upper_shadow = H - np.maximum(O, C)
     _lower_shadow = np.minimum(O, C) - L
     _body = ABS(C - O)
@@ -1346,7 +1349,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _recent_limit = EXIST(_limit_up, 3)
     _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
-    _s1 = _accel & _big_vol & _big_yin
+    _at_high = C >= HHV(C, HUANGBAI_S1_HIGH_PERIOD) * HUANGBAI_S1_HIGH_RATIO
+    _s1 = _accel & _big_vol & _big_yin & _at_high
     _upper_shadow = H - np.maximum(O, C)
     _lower_shadow = np.minimum(O, C) - L
     _body = ABS(C - O)

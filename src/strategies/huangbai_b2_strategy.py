@@ -6,7 +6,7 @@
 3. 前一天有B1信号 + 当天有倍量柱信号（B2核心入场条件）
 4. vol_expand_ok 五重过滤链（缩量拉升排除/连续涨停缩量排除/放量下跌排除/S1大风车排除）
 5. 组合级模拟：100万/10只/每只10万
-6. 按缩量排序+流动市值排序，取前1支
+6. 涨幅4%-5%优先排序（|涨幅-4.5%|升序），次按缩量排序
 
 倍量柱定义（通达信公式）：
   AVG40 := MA(VOL, 40);
@@ -117,6 +117,14 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     signals["b1_original"] = b1_original
     signals["beiliangzhu"] = beiliangzhu
 
+    # 当日涨幅百分比 (C - REF(C,1)) / REF(C,1) * 100
+    ref_c = REF(C, 1)
+    daily_pct = np.where(ref_c > 0, (C - ref_c) / ref_c * 100, 0.0)
+    signals["daily_pct"] = daily_pct
+
+    # B2排序：涨4%-5%优先，用|daily_pct - 4.5|替代shrink_score
+    signals["b2_sort_primary"] = np.abs(daily_pct - 4.5)
+
     return signals
 
 
@@ -141,6 +149,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
         "J": float(all_bars.get("J", [0])[i]) if "J" in all_bars else 0.0,
         "RSI": float(all_bars.get("RSI", [0])[i]) if "RSI" in all_bars else 0.0,
         "shrink_score": float(all_bars["shrink_score"][i]),
+        "daily_pct": float(all_bars["daily_pct"][i]),
         "beiliangzhu": bool(all_bars["beiliangzhu"][i]),
         "b1_yesterday": bool(all_bars["b1_original"][i - 1]),
     }
@@ -239,15 +248,17 @@ def scan_all(stock_type="main", skip_weekly=False,
                 results.append(sig)
                 blz = "Y" if sig.get("beiliangzhu") else "N"
                 b1y = "Y" if sig.get("b1_yesterday") else "N"
+                pct = sig.get("daily_pct", 0.0)
                 print(f"  {code}  "
-                      f"C={sig['close']:.2f}  缩量={sig['shrink_score']:.3f}  "
+                      f"C={sig['close']:.2f}  涨幅={pct:.1f}%  "
+                      f"缩量={sig['shrink_score']:.3f}  "
                       f"倍量柱={blz}  前日B1={b1y}")
             if done % 500 == 0:
                 print(f"  ... 已扫描 {done}/{total} ({done/total*100:.0f}%)  "
                       f"命中 {len(results)}  耗时 {time.time()-t0:.1f}s")
 
     elapsed = time.time() - t0
-    results.sort(key=lambda x: x["shrink_score"])
+    results.sort(key=lambda x: (abs(x.get("daily_pct", 0) - 4.5), x["shrink_score"]))
 
     print(f"\n{'=' * 55}")
     print(f"  B2扫描完成: {total} 只  命中 {len(results)} 只  "
@@ -257,12 +268,13 @@ def scan_all(stock_type="main", skip_weekly=False,
     print(f"{'=' * 55}")
 
     if results:
-        print(f"\n  选股结果（按缩量排序）")
+        print(f"\n  选股结果（按涨幅接近4.5%排序）")
         print(f"{'=' * 55}")
         for r in results:
             tag = " <<< TOP" if r == results[0] else ""
+            pct = r.get("daily_pct", 0.0)
             print(f"  {r['code']}  C={r['close']:.2f}  "
-                  f"缩量={r['shrink_score']:.3f}{tag}")
+                  f"涨幅={pct:.1f}%  缩量={r['shrink_score']:.3f}{tag}")
 
     return results, market_macd_ok
 
@@ -294,6 +306,15 @@ def _scan_one_all_bars(code, params):
             amount = df["amount"].values.astype(float)
             signals["avg_amount_20"] = pd.Series(amount).rolling(
                 20, min_periods=1).mean().values
+            # B2 T+1买入：将入场信号和排序字段前移1天（不环绕）
+            for key in ("b1", "b2_sort_primary", "shrink_score", "vol_expand_ok",
+                        "liutong_mask", "chip_spread", "avg_amount_20"):
+                arr = signals.get(key)
+                if arr is not None and len(arr) > 1:
+                    shifted = np.empty_like(arr)
+                    shifted[0] = False if arr.dtype == bool else float('nan')
+                    shifted[1:] = arr[:-1].copy()
+                    signals[key] = shifted
         return code, signals, False
     except Exception as e:
         return code, {"error": str(e)}, True

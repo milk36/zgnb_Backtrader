@@ -279,18 +279,29 @@ class PortfolioSimulator:
                             cs = float('inf')
                     else:
                         cs = float('inf')
-                    candidates.append((code, score, avg_amt, cs, idx, sig))
+                    b2p = sig.get("b2_sort_primary", None)
+                    if b2p is not None:
+                        b2p = b2p[idx]
+                        if np.isnan(b2p):
+                            b2p = float('inf')
+                    candidates.append((code, score, avg_amt, cs, b2p, idx, sig))
             except (IndexError, TypeError):
                 continue
 
         if not candidates:
             return
 
-        # 按 shrink_score 升序, avg_amount_20 降序, chip_spread 升序
-        candidates.sort(key=lambda x: (x[1], -x[2], x[3]))
-        code, score, avg_amt, cs, idx, sig = candidates[0]
+        # B2策略：b2_sort_primary(|涨幅-4.5%|)升序优先，再按缩量/市值/筹码
+        # 其他策略：b2p=None排后，等价于原排序
+        candidates.sort(key=lambda x: (x[4] if x[4] is not None else float('inf'),
+                                       x[1], -x[2], x[3]))
+        code, score, avg_amt, cs, b2p, idx, sig = candidates[0]
 
-        price = sig["close"][idx]
+        # B2: T+1开盘买入
+        if "B2" in self._strategy_tag:
+            price = sig["open"][idx]
+        else:
+            price = sig["close"][idx]
         if price <= 0:
             return
 
@@ -311,20 +322,23 @@ class PortfolioSimulator:
         white_val = sig["white"][idx]
         yellow_val = sig["yellow"][idx]
         low_val = sig["low"][idx]
-        wy_diff = (white_val - yellow_val) / yellow_val
-        if wy_diff < 0.05:
-            sl = yellow_val * 0.99
-        elif price >= white_val:
-            sl = low_val * 0.99
+        if "B2" in self._strategy_tag:
+            sl = low_val
         else:
-            sl = yellow_val * 0.99
+            wy_diff = (white_val - yellow_val) / yellow_val
+            if wy_diff < 0.05:
+                sl = yellow_val * 0.99
+            elif price >= white_val:
+                sl = low_val * 0.99
+            else:
+                sl = yellow_val * 0.99
 
         pos = Position(
             code=code, buy_date=date, buy_price=price,
             buy_low=low_val, white_at_buy=white_val,
             yellow_at_buy=yellow_val, stop_loss=sl, size=shares,
         )
-        pos.sl_based_on_yellow = (price < white_val)
+        pos.sl_based_on_yellow = False if "B2" in self._strategy_tag else (price < white_val)
         self._positions[code] = pos
         self._cash -= total_cost
 
