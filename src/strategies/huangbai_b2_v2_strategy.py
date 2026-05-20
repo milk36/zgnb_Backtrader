@@ -236,25 +236,11 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
 def scan_all(stock_type="main", skip_weekly=False,
              tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS,
              skip_on_bear=False):
-    """B2_V2全市场扫描：大盘MACD过滤 + 30日B1频次 + 前日B1 + 当日倍量柱"""
+    """B2_V2全市场扫描：30日B1频次 + 前日B1 + 当日倍量柱（不检查大盘MACD）"""
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
-    # 检查大盘MACD状态
+    # B2_V2不检查大盘MACD，始终允许买入
     market_macd_ok = True
-    market_df = load_market_index(tdxdir, market)
-    if market_df is not None and len(market_df) > 0:
-        market_close = market_df["close"].values.astype(float)
-        _, _, bullish = compute_market_macd(market_close)
-        market_macd_ok = bool(bullish[-1])
-        status = "多头" if market_macd_ok else "空头"
-        print(f"  大盘MACD状态: {status} (最新收盘={market_close[-1]:.2f})")
-        if not market_macd_ok:
-            if skip_on_bear:
-                print("  大盘MACD处于空头区间，跳过扫描 (skip_on_bear=True)")
-                return [], market_macd_ok
-            print("  大盘MACD处于空头区间，仅扫描不执行买入")
-    else:
-        print("  警告: 无法获取大盘MACD数据，跳过大盘过滤")
 
     codes = _get_all_codes(tdxdir)
     total = len(codes)
@@ -314,8 +300,6 @@ def scan_all(stock_type="main", skip_weekly=False,
     print(f"\n{'=' * 55}")
     print(f"  B2_V2扫描完成: {total} 只  命中 {len(results)} 只  "
           f"错误 {errors}  耗时 {elapsed:.1f}s")
-    if not market_macd_ok:
-        print(f"  [注意] 大盘MACD空头，建议不执行买入")
     print(f"{'=' * 55}")
 
     if results:
@@ -453,16 +437,7 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
         for ed in error_details:
             print(f"  错误: {ed}")
 
-    # 计算大盘MACD多头状态
+    # B2_V2不使用大盘MACD过滤
     market_macd_bullish = None
-    if len(trading_days) > 0:
-        print("  计算大盘MACD状态...")
-        market_macd_bullish = compute_market_macd_for_trading_days(
-            trading_days, tdxdir, market)
-        if market_macd_bullish is not None:
-            bull_count = np.sum(market_macd_bullish)
-            total_days = len(market_macd_bullish)
-            print(f"  大盘MACD多头天数: {bull_count}/{total_days} "
-                  f"({bull_count/total_days*100:.1f}%)")
 
     return all_signals, trading_days, market_macd_bullish

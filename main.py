@@ -435,10 +435,10 @@ def main():
         from src.strategies.huangbai_b2_v2_strategy import preload_all_signals as preload_b2v2
 
         print("=" * 55)
-        print("  B2_V2: 30日B1频次 + 大盘MACD + 前日B1 + 当日倍量柱")
+        print("  B2_V2: 30日B1频次 + 前日B1 + 当日倍量柱")
         print("  阶段1: 预加载全市场信号数据")
         print("=" * 55)
-        all_signals, trading_days, market_macd_bullish = preload_b2v2(
+        all_signals, trading_days, _ = preload_b2v2(
             start=args.start, end=args.end,
             stock_type=args.stock_type)
 
@@ -452,8 +452,6 @@ def main():
         print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
               f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
               f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
-        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
-        print(f"  大盘MACD过滤: {macd_status}")
         print(f"{'=' * 55}")
 
         sim = PortfolioSimulator(
@@ -465,7 +463,7 @@ def main():
             commission=COMMISSION,
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
-            market_macd_bullish=market_macd_bullish,
+            market_macd_bullish=None,
             strategy_tag="[B2_V2]")
         sim.run()
         report = sim.report()
