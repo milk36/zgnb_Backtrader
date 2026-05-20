@@ -372,8 +372,10 @@ def main():
         print("=" * 55)
         print("  N型B1 全市场选股扫描")
         print("  条件: 60日≥2次B1(间隔≥30天) + 价格逐次抬高 + 市值>50亿")
+        print(f"  区间: {args.start} ~ {args.end}")
         print("=" * 55)
-        scan_all_nx_b1(stock_type=args.stock_type)
+        scan_all_nx_b1(stock_type=args.stock_type,
+                       start_date=args.start, end_date=args.end)
         return
 
     # ---- B2 倍量柱策略 ----

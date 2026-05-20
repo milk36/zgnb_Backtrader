@@ -47,6 +47,15 @@ NX_B1_MIN_GAP = 30         # 两次B1间隔最少30个交易日
 NX_T3_DAYS = 3             # T+3统计天数
 NX_T3_TARGET_PCT = 10.0    # T+3涨幅目标(%)
 
+# ---------- 假案例排除参数 ----------
+EXCLUDE_FAST_RISE_PCT = 15.0    # 快速拉升：5日涨幅阈值(%)
+EXCLUDE_FLAT_VOL_RATIO = 0.6    # 平量出货：下跌均量/拉升均量比
+EXCLUDE_VOL_CV = 0.8            # 不均匀：量能变异系数阈值
+EXCLUDE_PV_CORR = 0.2           # 不均匀：价量相关性下限
+EXCLUDE_GAP_UP_COUNT = 3        # 跳空拉升：最少跳空次数
+EXCLUDE_SIDEWAYS_PCT = 12.0     # 横盘：价格波动幅度上限(%)
+EXCLUDE_DUMP_VOL_RATIO = 1.5    # 末端放量：最后均量/横盘均量比
+
 
 # ---------- 复用 V4 的 helper ----------
 
@@ -311,22 +320,30 @@ def _compute_all_bar_b1_and_filters(C, H, L, O, V, dates, params):
 #  N型结构检测 + T+3统计                                               #
 # ================================================================== #
 
-def _find_nx_b1_pattern(b1, C, dates, lookback=NX_B1_LOOKBACK,
+def _find_nx_b1_pattern(b1, C, dates, ref_idx=None, lookback=NX_B1_LOOKBACK,
                         min_count=NX_B1_MIN_COUNT, min_gap=NX_B1_MIN_GAP):
-    """在最近lookback天内寻找N型B1结构
+    """在ref_idx向前lookback天内寻找N型B1结构
 
     N型条件：
     1. >=min_count 次B1信号
     2. 任意相邻两次间隔 >= min_gap 天
     3. 每次B1价格 > 前一次B1价格（低点抬高）
 
+    Args:
+        ref_idx: 参考点索引（None则取最后一个bar）
+        lookback: 回看天数
+        min_count: 最少B1信号次数
+        min_gap: 最小间隔天数
+
     Returns:
         list[dict] - B1信号列表 [{"idx": int, "date": str, "price": float}]
         或 None（不符合N型）
     """
     n = len(b1)
-    start = max(0, n - lookback)
-    recent_b1 = b1[start:]
+    if ref_idx is None:
+        ref_idx = n - 1
+    start = max(0, ref_idx - lookback)
+    recent_b1 = b1[start:ref_idx + 1]
     indices = np.where(recent_b1)[0] + start
 
     if len(indices) < min_count:
@@ -380,6 +397,182 @@ def _compute_t3_stats(C, b1_list, t3_days=NX_T3_DAYS, target_pct=NX_T3_TARGET_PC
 
 
 # ================================================================== #
+#  假案例排除过滤                                                       #
+# ================================================================== #
+
+def _exclude_rapid_rise_flat_dist(C, V, nx_b1_list):
+    """排除：快速拉升后平量出货
+
+    在N型B1区间内检测：快速拉升（5日涨幅>15%）后，
+    价格回调时成交量未明显缩小的出货形态。
+    """
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+        seg_C = C[s:e + 1]
+        seg_V = V[s:e + 1]
+        seg_len = len(seg_C)
+        if seg_len < 10:
+            continue
+
+        peak_local = np.argmax(seg_C)
+        if peak_local < 5 or peak_local >= seg_len - 3:
+            continue
+
+        has_fast_rise = False
+        for j in range(5, peak_local + 1):
+            if seg_C[j - 5] > 0 and (seg_C[j] - seg_C[j - 5]) / seg_C[j - 5] * 100 > EXCLUDE_FAST_RISE_PCT:
+                has_fast_rise = True
+                break
+        if not has_fast_rise:
+            continue
+
+        rise_avg_V = np.mean(seg_V[max(0, peak_local - 5):peak_local + 1])
+        if rise_avg_V <= 0:
+            continue
+
+        decline_C = seg_C[peak_local:]
+        decline_V = seg_V[peak_local:]
+        sig_decline = decline_C < seg_C[peak_local] * 0.97
+        if not sig_decline.any():
+            continue
+
+        decline_vols = decline_V[sig_decline]
+        if len(decline_vols) >= 2 and np.mean(decline_vols) > rise_avg_V * EXCLUDE_FLAT_VOL_RATIO:
+            return True
+
+    return False
+
+
+def _exclude_irregular_rise(C, V, nx_b1_list):
+    """排除：拉升不均匀（非价升量涨）
+
+    在N型B1区间内检测量能忽大忽小、涨幅不规律的拉升形态。
+    """
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+        seg_C = C[s:e + 1]
+        seg_V = V[s:e + 1]
+        if len(seg_C) < 10:
+            continue
+
+        peak_local = np.argmax(seg_C)
+        rise_C = seg_C[:peak_local + 1]
+        rise_V = seg_V[:peak_local + 1]
+        if len(rise_C) < 8:
+            continue
+
+        up_mask = np.diff(rise_C) > 0
+        if up_mask.sum() < 5:
+            continue
+
+        up_vols = rise_V[1:][up_mask]
+        mean_v = np.mean(up_vols)
+        if mean_v <= 0:
+            continue
+
+        vol_cv = np.std(up_vols) / mean_v
+
+        up_pcts = np.diff(rise_C)[up_mask] / rise_C[:-1][up_mask]
+        up_vol_chg = np.diff(rise_V)[up_mask]
+        vol_std = np.std(up_vol_chg)
+        corr = np.corrcoef(up_pcts, up_vol_chg)[0, 1] if vol_std > 0 else 0
+
+        if vol_cv > EXCLUDE_VOL_CV and (np.isnan(corr) or corr < EXCLUDE_PV_CORR):
+            return True
+
+    return False
+
+
+def _exclude_b1_death_cross(C, white, yellow, nx_b1_list):
+    """排除：B1后黄白线死叉又金叉
+
+    在N型B1区间内检测白线下穿黄线后重新上穿的形态，
+    说明主力控盘实力不足。
+    """
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+        seg_w = white[s:e + 1]
+        seg_y = yellow[s:e + 1]
+        if len(seg_w) < 5:
+            continue
+
+        below = seg_w < seg_y
+        if not below.any():
+            continue
+
+        first_below = np.argmax(below)
+        after = below[first_below:]
+        if (~after).any():
+            return True
+
+    return False
+
+
+def _exclude_gap_up_sideways_dump(C, H, O, V, nx_b1_list):
+    """排除：连续跳空拉升后缩量横盘+末端放量出货
+
+    特征：
+    1. 前期连续跳空拉升（开盘>前日最高价，多次出现）
+    2. 之后缩量横盘（价格波动小，量能递减）
+    3. 末端放量出货（量大跌或量大不涨）
+    """
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+        seg_C = C[s:e + 1]
+        seg_H = H[s:e + 1]
+        seg_O = O[s:e + 1]
+        seg_V = V[s:e + 1]
+        seg_len = len(seg_C)
+        if seg_len < 15:
+            continue
+
+        # 1. 检测跳空拉升
+        prev_H = np.roll(seg_H, 1)
+        prev_H[0] = seg_H[0]
+        gap_up = seg_O > prev_H
+        gap_up[0] = False
+
+        peak_local = np.argmax(seg_C)
+        if peak_local < 3 or peak_local >= seg_len - 5:
+            continue
+
+        rise_gaps = gap_up[:peak_local + 1].sum()
+        if rise_gaps < EXCLUDE_GAP_UP_COUNT:
+            continue
+
+        # 2. 缩量横盘（最高点之后）
+        after_C = seg_C[peak_local:]
+        after_V = seg_V[peak_local:]
+        after_len = len(after_C)
+        if after_len < 5:
+            continue
+
+        price_range = (np.max(after_C) - np.min(after_C)) / np.min(after_C) * 100
+        if price_range > EXCLUDE_SIDEWAYS_PCT:
+            continue
+
+        mid = after_len // 2
+        first_avg = np.mean(after_V[:mid + 1])
+        second_avg = np.mean(after_V[mid:])
+        if first_avg <= 0 or second_avg >= first_avg:
+            continue
+
+        # 3. 末端放量出货
+        last_n = min(3, after_len)
+        last_avg = np.mean(after_V[-last_n:])
+        body_avg = np.mean(after_V[:-last_n]) if after_len > last_n else first_avg
+
+        if body_avg > 0 and last_avg > body_avg * EXCLUDE_DUMP_VOL_RATIO:
+            return True
+
+    return False
+
+
+# ================================================================== #
 #  全市场选股扫描                                                       #
 # ================================================================== #
 
@@ -413,8 +606,16 @@ def _init_process(tdxdir, market, capital_data):
     preload_disk_cache()
 
 
-def _scan_one_stock(code, params):
-    """扫描单只股票：计算全bar B1 + N型结构 + T+3"""
+def _scan_one_stock(code, params, start_date=None, end_date=None):
+    """扫描单只股票：在[start_date, end_date]区间内检测所有N型B1触发点
+
+    对区间内每个B1信号日，回看60天检查是否存在N型结构。
+    收集所有符合条件的触发点，返回最优结果（B1次数最多 + 缩量最佳）。
+
+    Args:
+        start_date: 筛选起始日期(str 'YYYY-MM-DD')，None 则不限制
+        end_date: 筛选截止日期(str 'YYYY-MM-DD')，None 则使用最新数据
+    """
     assert _process_reader is not None, "_process_reader 未初始化"
     try:
         df = _process_reader.daily(symbol=code)
@@ -424,6 +625,15 @@ def _scan_one_stock(code, params):
         from src.data.adjustment import apply_qfq
         df = apply_qfq(df, code)
 
+        # 截止日期过滤：仅使用 end_date 之前的数据
+        if end_date is not None:
+            end_ts = pd.Timestamp(end_date)
+            if df.index[0] > end_ts:
+                return code, None
+            df = df[df.index <= end_ts]
+            if len(df) < 300:
+                return code, None
+
         C = df["close"].values.astype(float)
         H = df["high"].values.astype(float)
         L = df["low"].values.astype(float)
@@ -431,10 +641,28 @@ def _scan_one_stock(code, params):
         V = df["vol"].values.astype(float) if "vol" in df.columns else df["volume"].values.astype(float)
         dates = df.index
 
-        # 流通市值过滤
+        # 确定搜索区间 [start_idx, end_idx]
+        n = len(C)
+        end_idx = n - 1
+        if end_date is not None:
+            end_ts = pd.Timestamp(end_date)
+            mask_end = dates <= end_ts
+            if not mask_end.any():
+                return code, None
+            end_idx = np.max(np.where(mask_end))
+
+        start_idx = 0
+        if start_date is not None:
+            start_ts = pd.Timestamp(start_date)
+            mask_start = dates >= start_ts
+            if not mask_start.any():
+                return code, None
+            start_idx = np.min(np.where(mask_start))
+
+        # 流通市值过滤（以搜索区间最后一个bar收盘价计算）
         capital_shares = _process_capital.get(code, 0) if _process_capital else 0
         if capital_shares > 0:
-            latest_cap = capital_shares * C[-1] / 10000  # 亿元
+            latest_cap = capital_shares * C[end_idx] / 10000  # 亿元
             if latest_cap < DNZH_MIN_MARKET_CAP:
                 return code, None
         else:
@@ -447,37 +675,60 @@ def _scan_one_stock(code, params):
 
         b1 = result["b1"]
         vol_expand_ok = result["vol_expand_ok"]
-        n = len(b1)
 
-        # 最新bar的vol_expand_ok检查
-        if not vol_expand_ok[n - 1]:
+        # 在搜索区间内的B1信号日滚动检测N型结构
+        b1_in_range = np.where(b1[start_idx:end_idx + 1])[0] + start_idx
+        best_pattern = None
+        best_ref_idx = None
+        qualifying_dates = []
+
+        for bi in b1_in_range:
+            if not vol_expand_ok[bi]:
+                continue
+            pattern = _find_nx_b1_pattern(b1, C, dates, ref_idx=bi)
+            if pattern is not None:
+                qualifying_dates.append(str(dates[bi])[:10])
+                # 保留B1次数最多、然后缩量最佳的
+                if best_pattern is None or len(pattern) > len(best_pattern) or (
+                        len(pattern) == len(best_pattern)
+                        and result["shrink_score"][bi] < result["shrink_score"][best_ref_idx]):
+                    best_pattern = pattern
+                    best_ref_idx = bi
+
+        if best_pattern is None:
             return code, None
 
-        # N型结构检测
-        nx_b1 = _find_nx_b1_pattern(b1, C, dates)
-        if nx_b1 is None:
+        # 假案例排除过滤
+        if _exclude_rapid_rise_flat_dist(C, V, best_pattern):
+            return code, None
+        if _exclude_irregular_rise(C, V, best_pattern):
+            return code, None
+        if _exclude_b1_death_cross(C, result["white"], result["yellow"], best_pattern):
+            return code, None
+        if _exclude_gap_up_sideways_dump(C, H, O, V, best_pattern):
             return code, None
 
-        # T+3统计（对所有B1信号点计算，不仅限于N型中的）
-        all_b1_indices = np.where(b1[max(0, n - NX_B1_LOOKBACK):])[0] + max(0, n - NX_B1_LOOKBACK)
-        all_b1_list = [{"idx": int(i), "date": str(dates[i])[:10], "price": float(C[i])}
-                       for i in all_b1_indices]
-        t3_stats = _compute_t3_stats(C, all_b1_list)
+        ref_idx = best_ref_idx
+
+        # T+3统计（对N型中所有B1信号点计算）
+        t3_stats = _compute_t3_stats(C, best_pattern)
         hit_count = sum(1 for t in t3_stats if t["hit"])
         hit_rate = hit_count / len(t3_stats) * 100 if t3_stats else 0
 
         return code, {
             "code": code,
-            "close": float(C[-1]),
+            "close": float(C[end_idx]),
             "market_cap": round(latest_cap, 1),
-            "shrink_score": float(result["shrink_score"][-1]),
-            "J": float(result["J"][-1]),
-            "RSI": float(result["rsi"][-1]),
-            "nx_b1_count": len(nx_b1),
-            "nx_b1_list": nx_b1,
-            "all_b1_count": len(all_b1_list),
+            "shrink_score": float(result["shrink_score"][ref_idx]),
+            "J": float(result["J"][ref_idx]),
+            "RSI": float(result["rsi"][ref_idx]),
+            "nx_b1_count": len(best_pattern),
+            "nx_b1_list": best_pattern,
+            "all_b1_count": len(b1_in_range),
             "t3_stats": t3_stats,
             "t3_hit_rate": round(hit_rate, 1),
+            "scan_date": str(dates[end_idx])[:10],
+            "qualifying_dates": qualifying_dates,
             # 图表数据
             "chart_data": {
                 "close": C,
@@ -497,9 +748,17 @@ def _scan_one_stock(code, params):
 
 
 def scan_all(stock_type="main", tdxdir=TDX_DIR, market=TDX_MARKET,
-             max_workers=SCAN_MAX_WORKERS):
-    """N型B1全市场扫描"""
+             max_workers=SCAN_MAX_WORKERS, start_date=None, end_date=None):
+    """N型B1全市场扫描
+
+    Args:
+        start_date: 筛选起始日期(str 'YYYY-MM-DD')，None 则不限制
+        end_date: 筛选截止日期(str 'YYYY-MM-DD')，None 则使用最新数据
+    """
     from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    date_range = f"{start_date or '最早'} ~ {end_date or '最新'}"
+    print(f"  筛选日期区间: {date_range}")
 
     # 加载流通市值数据
     print("  加载流通市值数据...")
@@ -530,7 +789,7 @@ def scan_all(stock_type="main", tdxdir=TDX_DIR, market=TDX_MARKET,
         initargs=(tdxdir, market, capital_data),
     ) as pool:
         futures = {
-            pool.submit(_scan_one_stock, code, params): code
+            pool.submit(_scan_one_stock, code, params, start_date, end_date): code
             for code in codes
         }
         for future in as_completed(futures):
@@ -576,6 +835,12 @@ def _print_results(results):
         print(f"  {r['code']}  C={r['close']:.2f}  市值={r['market_cap']:.0f}亿  "
               f"缩量={r['shrink_score']:.3f}  J={r['J']:.1f}  RSI={r['RSI']:.1f}")
         print(f"    N型B1({r['nx_b1_count']}次): {nx_prices}")
+        qd = r.get("qualifying_dates", [])
+        if len(qd) > 1:
+            print(f"    触发日期({len(qd)}次): {', '.join(qd[:5])}"
+                  f"{'...' if len(qd) > 5 else ''}")
+        elif qd:
+            print(f"    触发日期: {qd[0]}")
         print(f"    T+3胜率: {r['t3_hit_rate']:.0f}% ({r['all_b1_count']}个B1信号)")
         for t in r["t3_stats"]:
             mark = "V" if t["hit"] else "X"
@@ -622,16 +887,18 @@ def _generate_charts(results):
 
 
 def _plot_nx_b1_chart(result, output_dir):
-    """为单只股票绘制N型B1 K线图"""
+    """为单只股票绘制N型B1 K线图（含砖型图副图 + N型区域标注）"""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-    from matplotlib import font_manager
+    import matplotlib.patches as mpatches
+    from matplotlib.collections import PatchCollection
 
-    # 中文字体
+    # 中文字体 + A股配色
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
+    COLOR_YANG = "#ff4444"
+    COLOR_YIN = "#00aa00"
 
     cd = result["chart_data"]
     C = cd["close"]
@@ -644,76 +911,208 @@ def _plot_nx_b1_chart(result, output_dir):
     yellow = cd["yellow"]
     b1 = cd["b1"]
 
-    # 截取最近120天
+    # 以N型B1信号区域为中心截取显示范围
     n = len(C)
-    start = max(0, n - 120)
-    s = slice(start, n)
+    nx_list = result["nx_b1_list"]
+    center_idx = nx_list[-1]["idx"] if nx_list else n - 1
+    padding = 30
+    start = max(0, center_idx - 60 - padding)
+    end = min(n, center_idx + padding + 1)
+    s = slice(start, end)
     C_s, H_s, L_s, O_s, V_s = C[s], H[s], L[s], O[s], V[s]
     white_s, yellow_s = white[s], yellow[s]
     b1_s = b1[s]
     dates_s = dates[s]
+    n_s = len(C_s)
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10),
-                                    gridspec_kw={'height_ratios': [3, 1]},
-                                    sharex=True)
+    # 计算砖型图
+    from MyTT import HHV as _HHV, LLV as _LLV
+    hhv4 = _HHV(H_s, 4)
+    llv4 = _LLV(L_s, 4)
+    _br1 = (hhv4 - C_s) / np.maximum(hhv4 - llv4, 0.001) * 100 - 90
+    _br2 = SMA(_br1, 4, 1) + 100
+    _br3 = (C_s - llv4) / np.maximum(hhv4 - llv4, 0.001) * 100
+    _br4 = SMA(_br3, 6, 1)
+    _br5 = SMA(_br4, 6, 1) + 100
+    _br6 = _br5 - _br2
+    brick_s = np.where(_br6 > 4, _br6 - 4, 0)
+
+    # 三行布局：K线 + 成交量 + 砖型图
+    fig, (ax1, ax2, ax3) = plt.subplots(
+        3, 1, figsize=(16, 11),
+        gridspec_kw={'height_ratios': [3, 1, 1]},
+        sharex=True)
+    fig.subplots_adjust(hspace=0.05)
+
     fig.suptitle(f"N型B1选股 {result['code']}  C={result['close']:.2f}  "
-                 f"市值={result['market_cap']:.0f}亿  T+3胜率={result['t3_hit_rate']:.0f}%",
-                 fontsize=14, fontweight='bold')
+                 f"市值={result['market_cap']:.0f}亿  T+3胜率={result['t3_hit_rate']:.0f}%\n"
+                 f"选股日期: {', '.join(result.get('qualifying_dates', []))}",
+                 fontsize=13, fontweight='bold')
 
-    # K线图
-    x = np.arange(len(C_s))
-    colors = ['#ef5350' if O_s[i] > C_s[i] else '#26a69a' for i in range(len(C_s))]
+    x = np.arange(n_s)
 
-    for i in range(len(C_s)):
-        ax1.plot([x[i], x[i]], [L_s[i], H_s[i]], color=colors[i], linewidth=0.6)
-        ax1.plot([x[i], x[i]], [min(O_s[i], C_s[i]), max(O_s[i], C_s[i])],
-                 color=colors[i], linewidth=2.5)
+    # ---- K线图 ----
+    # 影线
+    ax1.vlines(x, L_s, H_s, colors="#888888", linewidths=0.5)
+    # 实体
+    rects, rect_colors = [], []
+    for i in range(n_s):
+        o_v, c_v = float(O_s[i]), float(C_s[i])
+        if np.isnan(o_v) or np.isnan(c_v):
+            continue
+        body_bottom = min(o_v, c_v)
+        body_height = abs(c_v - o_v)
+        if body_height < 0.001:
+            body_height = c_v * 0.002
+        rects.append(mpatches.Rectangle((x[i] - 0.35, body_bottom), 0.7, body_height))
+        rect_colors.append(COLOR_YANG if c_v >= o_v else COLOR_YIN)
+    if rects:
+        ax1.add_collection(PatchCollection(rects, facecolors=rect_colors,
+                                            edgecolors=rect_colors, linewidths=0.5))
+    valid_mask = ~np.isnan(H_s) & ~np.isnan(L_s)
+    if valid_mask.any():
+        y_min, y_max = np.nanmin(L_s[valid_mask]), np.nanmax(H_s[valid_mask])
+        margin = (y_max - y_min) * 0.08
+        ax1.set_ylim(y_min - margin, y_max + margin)
+    ax1.set_xlim(-1, n_s)
 
     # 均线
-    ax1.plot(x, white_s, color='white', linewidth=0.8, alpha=0.7, label='白线')
-    ax1.plot(x, yellow_s, color='#FFD54F', linewidth=0.8, alpha=0.7, label='黄线')
+    valid_w = ~np.isnan(white_s)
+    if valid_w.any():
+        ax1.plot(x[valid_w], white_s[valid_w], color='#666666', linewidth=1.2, alpha=0.9, label='白线')
+    valid_y = ~np.isnan(yellow_s)
+    if valid_y.any():
+        ax1.plot(x[valid_y], yellow_s[valid_y], color='#FFD700', linewidth=1.2, alpha=0.9, label='黄线')
 
-    # B1信号标记
+    # ---- N型区域标注 ----
+    nx_list = result["nx_b1_list"]
+    if len(nx_list) >= 2:
+        first_idx = nx_list[0]["idx"] - start
+        last_idx = nx_list[-1]["idx"] - start
+        if 0 <= first_idx < n_s and 0 <= last_idx < n_s:
+            # N型拉升区间（B1之间）
+            ax1.axvspan(first_idx - 0.5, last_idx + 0.5, alpha=0.10,
+                        color='#00cc00', zorder=0, label='N型区间')
+            # 连接线
+            nx_x, nx_low = [], []
+            for nb in nx_list:
+                idx = nb["idx"] - start
+                if 0 <= idx < n_s:
+                    nx_x.append(idx)
+                    nx_low.append(float(L_s[idx]))
+
+            # N型连接线（底部低点连线）
+            if len(nx_x) >= 2:
+                ax1.plot(nx_x, nx_low, 'b--', linewidth=1.5, alpha=0.8)
+                # 填充N型区域
+                ax1.fill_between(nx_x, [float(L_s[i]) for i in nx_x],
+                                 [float(H_s[i]) for i in nx_x],
+                                 alpha=0.06, color='#00cc00', zorder=0)
+
+            # 标注每个B1价格
+            for nb in nx_list:
+                idx = nb["idx"] - start
+                if 0 <= idx < n_s:
+                    ax1.plot(idx, float(L_s[idx]), marker='D', color='#00aa00',
+                             markersize=6, markeredgecolor='white', markeredgewidth=1, zorder=6)
+                    ax1.annotate(f"B1 {nb['price']:.2f}",
+                                 xy=(idx, float(L_s[idx])),
+                                 xytext=(-8, -16), textcoords='offset points',
+                                 fontsize=7, color='#006600', fontweight='bold',
+                                 bbox=dict(boxstyle='round,pad=0.2', fc='white',
+                                           ec='#00aa00', alpha=0.85))
+
+    # ---- B1信号标记（所有B1，不仅是N型中的）----
     b1_indices = np.where(b1_s)[0]
     if len(b1_indices) > 0:
-        b1_dates = [str(dates_s[i])[:10] for i in b1_indices]
-        b1_prices = [L_s[i] * 0.98 for i in b1_indices]
-        ax1.scatter(b1_indices, b1_prices, marker='*', s=120,
-                    c='magenta', zorder=5, label='B1信号')
+        ylim = ax1.get_ylim()
+        offset = (ylim[1] - ylim[0]) * 0.03
+        b1_prices = [float(L_s[i]) - offset for i in b1_indices]
+        ax1.scatter(b1_indices, b1_prices, marker='*', s=100,
+                    c='#ff00ff', zorder=5, label='B1信号',
+                    edgecolors='white', linewidths=0.5)
 
-    # N型B1连接线
-    nx_list = result["nx_b1_list"]
-    nx_x = []
-    nx_prices_plot = []
-    for nb in nx_list:
-        idx = nb["idx"] - start
-        if 0 <= idx < len(C_s):
-            nx_x.append(idx)
-            nx_prices_plot.append(L_s[idx] * 0.96)
-            ax1.annotate(f"{nb['price']:.2f}", (idx, L_s[idx] * 0.94),
-                         fontsize=8, color='blue', ha='center', fontweight='bold')
-    if len(nx_x) >= 2:
-        ax1.plot(nx_x, nx_prices_plot, 'b--', linewidth=1.5, alpha=0.8, label='N型结构')
+    # ---- 选股日期竖线标记 ----
+    qd = result.get("qualifying_dates", [])
+    if qd:
+        ylim = ax1.get_ylim()
+        y_top = ylim[1]
+        for qd_str in qd:
+            qd_ts = pd.Timestamp(qd_str)
+            # 在dates_s中找对应的图表x坐标
+            qd_x = None
+            for di in range(len(dates_s)):
+                if str(dates_s[di])[:10] == qd_str:
+                    qd_x = di
+                    break
+            if qd_x is not None:
+                ax1.axvline(qd_x, color='#FF6600', linewidth=1.2, linestyle='--',
+                            alpha=0.8, zorder=4)
+                ax1.annotate(qd_str, xy=(qd_x, y_top),
+                             xytext=(0, -12), textcoords='offset points',
+                             fontsize=7, color='#FF6600', fontweight='bold',
+                             ha='center', rotation=45,
+                             bbox=dict(boxstyle='round,pad=0.15', fc='white',
+                                       ec='#FF6600', alpha=0.9))
 
-    ax1.legend(loc='upper left', fontsize=8)
-    ax1.set_ylabel('价格')
+    # ---- 图例 ----
+    legend_items = []
+    legend_items.append(plt.Line2D([0], [0], color='#666666', lw=1.2, label='白线'))
+    legend_items.append(plt.Line2D([0], [0], color='#FFD700', lw=1.2, label='黄线'))
+    if len(b1_indices) > 0:
+        legend_items.append(plt.Line2D([0], [0], marker='*', color='#ff00ff',
+                                        linestyle='None', markersize=8, label='B1信号'))
+    if qd:
+        legend_items.append(plt.Line2D([0], [0], color='#FF6600', lw=1.2,
+                                        linestyle='--', label='选股日期'))
+    if len(nx_list) >= 2:
+        legend_items.append(mpatches.Patch(facecolor='#00cc00', alpha=0.15, label='N型区间'))
+        legend_items.append(plt.Line2D([0], [0], marker='D', color='#00aa00',
+                                        linestyle='None', markersize=6, label='N型低点'))
+    ax1.legend(handles=legend_items, loc='upper left', fontsize=8, framealpha=0.9)
+    ax1.set_ylabel('价格', fontsize=10)
     ax1.grid(True, alpha=0.3)
+    ax1.set_facecolor('white')
 
-    # 成交量
-    v_colors = ['#ef5350' if O_s[i] > C_s[i] else '#26a69a' for i in range(len(V_s))]
-    ax2.bar(x, V_s, color=v_colors, width=0.8, alpha=0.7)
-    ax2.set_ylabel('成交量')
+    # ---- 成交量 ----
+    v_colors = [COLOR_YANG if C_s[i] >= O_s[i] else COLOR_YIN for i in range(n_s)]
+    ax2.bar(x, V_s, color=v_colors, width=0.7, alpha=0.7)
+    ax2.set_ylabel('成交量', fontsize=10)
     ax2.grid(True, alpha=0.3)
+    ax2.set_facecolor('white')
 
-    # X轴日期
-    tick_step = max(1, len(x) // 10)
-    tick_pos = x[::tick_step]
-    tick_labels = [str(dates_s[i])[:10] for i in range(0, len(dates_s), tick_step)]
-    ax2.set_xticks(tick_pos)
-    ax2.set_xticklabels(tick_labels, rotation=45, fontsize=7)
+    # ---- 砖型图 ----
+    for i in range(n_s):
+        cur = float(brick_s[i])
+        prev = float(brick_s[i - 1]) if i > 0 else cur
+        if np.isnan(cur) or np.isnan(prev):
+            continue
+        bar_bottom = min(cur, prev)
+        bar_top = max(cur, prev)
+        if bar_top - bar_bottom < 0.001:
+            continue
+        color = COLOR_YANG if cur >= prev else COLOR_YIN
+        ax3.bar(x[i], bar_top - bar_bottom, bottom=bar_bottom,
+                width=0.7, color=color, alpha=0.85)
+    valid_b = ~np.isnan(brick_s)
+    if valid_b.any():
+        y_min_b, y_max_b = np.nanmin(brick_s[valid_b]), np.nanmax(brick_s[valid_b])
+        margin_b = (y_max_b - y_min_b) * 0.08
+        ax3.set_ylim(max(0, y_min_b - margin_b), y_max_b + margin_b)
+    ax3.set_xlim(-1, n_s)
+    ax3.set_ylabel('砖型图', fontsize=10)
+    ax3.grid(True, alpha=0.3)
+    ax3.set_facecolor('white')
+
+    # ---- X轴日期 ----
+    step = max(1, n_s // 12)
+    ax3.set_xticks(x[::step])
+    ax3.set_xticklabels(
+        [str(dates_s[i])[:10] for i in range(0, n_s, step)],
+        rotation=45, fontsize=7)
 
     plt.tight_layout()
     filepath = os.path.join(output_dir, f"{result['code']}.png")
-    fig.savefig(filepath, dpi=120, bbox_inches='tight')
+    fig.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close(fig)
     print(f"    {result['code']}.png 已保存")
