@@ -38,6 +38,8 @@ from config import (
     HUANGBAI_SURGE_PRICE_PCT, HUANGBAI_SURGE_VOL_RATIO,
     HUANGBAI_S1_PERIOD,
     HUANGBAI_S1_HIGH_PERIOD, HUANGBAI_S1_HIGH_RATIO,
+    HUANGBAI_S1_ACCEL_PCT, HUANGBAI_S1_ACCEL_LOOKBACK,
+    HUANGBAI_STEPPED_DROP_PCT, HUANGBAI_STEPPED_DROP_LOOKBACK,
     MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
     DNZH_MIN_MARKET_CAP,
 )
@@ -466,7 +468,8 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
         no_heavy_decline = ~(_dvs > _rvs)
         _s1p = HUANGBAI_S1_PERIOD
-        _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+        _accel_raw = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > HUANGBAI_S1_ACCEL_PCT
+        _accel = EXIST(_accel_raw, HUANGBAI_S1_ACCEL_LOOKBACK)
         _recent_limit = EXIST(_limit_up, 3)
         _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
         _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
@@ -481,7 +484,9 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _near_high = C >= HHV(C, 20) * 0.97
         _upper_pct = _upper_shadow / np.maximum(C, 0.001) * 100
         _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
-        no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow, _s1p)
+        _from_high = (C - HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)) / HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK) * 100
+        _stepped_selloff = _accel & (_from_high < HUANGBAI_STEPPED_DROP_PCT)
+        no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)
         self._vol_expand_ok = (has_vol_expand & no_shrinkage_surge
                                & no_consec_limit_shrink & no_heavy_decline
                                & no_s1_dafengche)
@@ -860,7 +865,8 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values[i]
     no_heavy_decline = not (_dvs > _rvs)
     _s1p = HUANGBAI_S1_PERIOD
-    _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+    _accel_raw = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > HUANGBAI_S1_ACCEL_PCT
+    _accel = bool(EXIST(_accel_raw, HUANGBAI_S1_ACCEL_LOOKBACK)[i])
     _recent_limit = EXIST(_limit_up, 3)
     _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
@@ -875,7 +881,9 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _near_high = C >= HHV(C, 20) * 0.97
     _upper_pct = _upper_shadow / np.maximum(C, 0.001) * 100
     _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
-    no_s1_dafengche = not EXIST(_s1 | _dafengche | _long_upper_shadow, _s1p)[i]
+    _from_high = (C[i] - HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)[i]) / HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)[i] * 100
+    _stepped_selloff = _accel and (_from_high < HUANGBAI_STEPPED_DROP_PCT)
+    no_s1_dafengche = not EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)[i]
     vol_expand_ok = (has_vol_expand and no_shrinkage_surge
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
@@ -1345,7 +1353,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _dvs = pd.Series(_decline_v).rolling(_vep, min_periods=1).sum().values
     no_heavy_decline = ~(_dvs > _rvs)
     _s1p = HUANGBAI_S1_PERIOD
-    _accel = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > 15
+    _accel_raw = (C - REF(C, 5)) / np.maximum(REF(C, 5), 0.001) * 100 > HUANGBAI_S1_ACCEL_PCT
+    _accel = EXIST(_accel_raw, HUANGBAI_S1_ACCEL_LOOKBACK)
     _recent_limit = EXIST(_limit_up, 3)
     _big_vol = (V > HHV(V, 20) * 2) | (V > MA(V, 60) * 3) | (_recent_limit & (V > REF(V, 1) * 1.5))
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
@@ -1360,7 +1369,9 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _near_high = C >= HHV(C, 20) * 0.97
     _upper_pct = _upper_shadow / np.maximum(C, 0.001) * 100
     _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
-    no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow, _s1p)
+    _from_high = (C - HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)) / HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK) * 100
+    _stepped_selloff = _accel & (_from_high < HUANGBAI_STEPPED_DROP_PCT)
+    no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)
     vol_expand_ok = (has_vol_expand & no_shrinkage_surge
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)

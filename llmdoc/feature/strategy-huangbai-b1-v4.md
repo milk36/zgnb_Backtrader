@@ -70,7 +70,7 @@ V2 策略的变体版本，**移除黄白线金叉条件**，新增**60日动能
 - `src/strategies/dongneng_zhuan_strategy.py` - 动能砖策略（`_compute_dongneng_ok` 复用其核心逻辑，导入 `_rolling_std` / `_rolling_sum`）
 - `src/strategies/huangbai_b1_v2_strategy.py` - V2 策略（V4 复制自 V2，B1 变更需同步两处）
 - `src/engine/portfolio_simulator.py` - 组合模拟器（`dongneng_recent` 买入条件，兼容 `stock_macd_bullish` 回退）
-- `config.py` - MACD 参数、HUANGBAI_* 系列参数
+- `config.py` - MACD 参数、HUANGBAI_* 系列参数（含 `HUANGBAI_S1_ACCEL_PCT=13`、`HUANGBAI_S1_ACCEL_LOOKBACK=10`、`HUANGBAI_STEPPED_DROP_PCT=-12`、`HUANGBAI_STEPPED_DROP_LOOKBACK=10`）
 - `main.py` - `huangbai_v4` 策略注册与三种运行模式分发
 
 ## 4. Attention
@@ -78,8 +78,13 @@ V2 策略的变体版本，**移除黄白线金叉条件**，新增**60日动能
 - B1 逻辑变更需同步三个位置：`HuangBaiB1V4Strategy.indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`（与 V1/V2 相同的三处同步问题）
 - 动能信号逻辑变更需同步三处中的 `_compute_dongneng_ok()` 调用。`_compute_dongneng_ok()` 本身是独立函数，三处共用
 - V4 代码独立于 V2 文件，不共享函数引用。V2 的 B1 逻辑变更不会自动同步到 V4，需手动维护
-- S1/大风车/长上影线排除（三处同步：`indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`）：新增 `_long_upper_shadow` 检测（C>=HHV(C,20)*0.97 + 上影线>3% + 上影线>实体*2 + 量>前日*1.3），纳入 `no_s1_dafengche` 的 OR 关系
-- S1 天量判定新增涨停后替代条件（同V1/V2）：近3日有涨停时量能只需 > 前日量*1.5，解决连续涨停拉高HHV基线问题
+- S1 加速检测使用 **回溯窗口** 模式（`HUANGBAI_S1_ACCEL_PCT=13`，`HUANGBAI_S1_ACCEL_LOOKBACK=10`）：`_accel_raw = (C-REF(C,5))/REF(C,5)*100 > 13`，然后 `_accel = EXIST(_accel_raw, 10)`，即近10天内任一天有5日涨幅超过13%即视为加速。原逻辑要求当天同时满足加速+大阴线，改为回溯窗口后解决了加速窗口和出货窗口错开时漏检的问题
+- S1/大风车/长上影线/阶梯出货排除（三处同步）：`no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, 60)`
+  - `_s1` = `_accel` & `_big_vol` & `_big_yin` & `_at_high`（加速+巨量+大阴线+高位四重AND）
+  - `_dafengche` = `_accel` & `_hist_vol` & `_long_shadow_yin` & `(V > REF(V,1))`（加速+天量+长影阴+放量）
+  - `_long_upper_shadow` = 近高点 + 上影线>3% + 上影线>实体*2 + 量>前日*1.3
+  - `_stepped_selloff` = `_accel` & `_from_high < -12%`（近期加速 + 从10日高点回落超过12%，典型主力高位阶梯式出货形态）
+- S1 天量判定新增涨停后替代条件：近3日有涨停时量能只需 > 前日量*1.5，解决连续涨停拉高HHV基线问题
 - `_compute_dongneng_ok()` 不含流通市值过滤（`dongneng_zhuan_strategy` 中的 `liutong_mask` 在 V4 中省略）
 - `preload_all_signals()` 返回三元组，调用方需注意解包
 - V4 不支持 `skip_gc` 参数（金叉条件已移除，该参数无意义）
