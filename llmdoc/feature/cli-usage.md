@@ -17,6 +17,7 @@
 | `dongneng_zhuan` | 动能+砖 | 组合模拟（默认）/ 仅扫描 |
 | `nxing_zhuan` | N型+砖 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2` | B2 倍量柱 | 组合模拟（默认）/ 仅扫描 |
+| `nxing_b1` | N型B1选股 | 全市场扫描（仅扫描） |
 
 ### 运行模式
 
@@ -64,11 +65,21 @@
 
 注意：`huangbai_b2` 不支持 `--symbol` 单股回测，不需要 `--portfolio` 标志。
 
+#### N型B1选股（`nxing_b1`）
+
+纯选股扫描策略，无组合模拟、无回测，运行即扫描全市场并生成K线图：
+
+| 模式 | 触发参数 | 说明 |
+|------|----------|------|
+| 全市场扫描 | 无需额外参数（默认） | 60日N型B1结构筛选 + 流通市值>50亿 + vol_expand_ok过滤 + T+3胜率统计 + 自动生成K线图 |
+
+注意：`nxing_b1` 不支持 `--symbol`、`--portfolio`、`--scan`、`--scan-only` 等参数，运行即执行全市场扫描。
+
 ### 完整参数表
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `dongneng_zhuan` / `nxing_zhuan` / `huangbai_b2` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `dongneng_zhuan` / `nxing_zhuan` / `huangbai_b2` / `nxing_b1` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -173,6 +184,13 @@ python main.py --strategy huangbai_b2 --scan-only
 
 # 组合级模拟 + K线图
 python main.py --strategy huangbai_b2 --chart
+```
+
+#### N型B1选股
+
+```bash
+# 全市场扫描（默认模式，运行即扫描）
+python main.py --strategy nxing_b1
 ```
 
 #### 前复权缓存管理

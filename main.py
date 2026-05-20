@@ -70,6 +70,7 @@ from src.strategies.nxing_zhuan_strategy import scan_all as scan_all_nxzh
 from src.strategies.jinzhuan_strategy import scan_all as scan_all_jzh
 from src.strategies.huangbai_b2_strategy import scan_all as scan_all_b2
 from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
+from src.strategies.nxing_b1_scan_strategy import scan_all as scan_all_nx_b1
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -83,6 +84,7 @@ STRATEGIES = {
     "jinzhuan": None,        # 仅支持组合级模拟，不支持单股回测
     "huangbai_b2": None,     # B2倍量柱：仅支持组合级模拟+扫描
     "huangbai_b2_v2": None,  # B2_V2倍量柱：30日B1频次过滤，仅支持组合级模拟+扫描
+    "nxing_b1": None,       # N型B1选股：纯选股+图表，不做买卖
 }
 
 
@@ -363,6 +365,15 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        return
+
+    # ---- N型B1选股策略 ----
+    if args.strategy == "nxing_b1":
+        print("=" * 55)
+        print("  N型B1 全市场选股扫描")
+        print("  条件: 60日≥2次B1(间隔≥30天) + 价格逐次抬高 + 市值>50亿")
+        print("=" * 55)
+        scan_all_nx_b1(stock_type=args.stock_type)
         return
 
     # ---- B2 倍量柱策略 ----
