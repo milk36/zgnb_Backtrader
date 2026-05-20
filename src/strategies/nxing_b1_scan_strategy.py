@@ -44,7 +44,8 @@ from src.strategies.dongneng_zhuan_strategy import _load_capital_data
 NX_B1_LOOKBACK = 60        # 60日内寻找B1信号
 NX_B1_MIN_COUNT = 2        # 至少2次B1信号
 NX_B1_MIN_GAP = 30         # 两次B1间隔最少30个交易日
-NX_T3_DAYS = 3             # T+3统计天数
+NX_GC_MAX_BARS = 30        # 金叉+B1：金叉距今最大bar数（"刚刚金叉"）
+NX_T3_DAYS = 5             # T+3统计天数
 NX_T3_TARGET_PCT = 10.0    # T+3涨幅目标(%)
 
 # ---------- 假案例排除参数 ----------
@@ -55,6 +56,14 @@ EXCLUDE_PV_CORR = 0.2           # 不均匀：价量相关性下限
 EXCLUDE_GAP_UP_COUNT = 3        # 跳空拉升：最少跳空次数
 EXCLUDE_SIDEWAYS_PCT = 12.0     # 横盘：价格波动幅度上限(%)
 EXCLUDE_DUMP_VOL_RATIO = 1.5    # 末端放量：最后均量/横盘均量比
+EXCLUDE_TOP_VOL_RATIO = 2.0     # 顶部放量：量能/5日均量比
+EXCLUDE_TOP_BODY_PCT = 3.0      # 顶部大阴线：实体最小幅度(%)
+EXCLUDE_DISCON_DOWN_RATIO = 0.45  # 不连续：下跌日占比阈值
+EXCLUDE_DISCON_VOL_CV = 0.5     # 不连续：量能变异系数阈值
+EXCLUDE_DISCON_MAX_GAIN = 20.0  # 不连续：最大涨幅阈值(%)
+EXCLUDE_STEP_DROP_PCT = 3.0     # 阶梯量：最小跌幅(%)
+EXCLUDE_STEP_VOL_RATIO = 1.3    # 阶梯量：后半段/前半段阴线量比
+EXCLUDE_LIMIT_DOWN_DAYS = 5     # B1前N日内检测跌停
 
 
 # ---------- 复用 V4 的 helper ----------
@@ -373,6 +382,54 @@ def _find_nx_b1_pattern(b1, C, dates, ref_idx=None, lookback=NX_B1_LOOKBACK,
     return None
 
 
+def _find_gc_b1_pattern(b1, C, dates, white, yellow, ref_idx=None,
+                        lookback=NX_B1_LOOKBACK, gc_max_bars=NX_GC_MAX_BARS):
+    """金叉+B1模式：白线刚刚金叉黄线后出现B1信号
+
+    如果白线最近刚上穿黄线（金叉），则不要求前面有B1信号，
+    只要金叉之后出现B1即可。
+
+    Returns:
+        list[dict] - 单元素B1列表，或 None
+    """
+    n = len(b1)
+    if ref_idx is None:
+        ref_idx = n - 1
+    start = max(0, ref_idx - lookback)
+
+    seg_w = white[start:ref_idx + 1]
+    seg_y = yellow[start:ref_idx + 1]
+    prev_w = np.roll(seg_w, 1)
+    prev_y = np.roll(seg_y, 1)
+    prev_w[0] = seg_w[0]
+    prev_y[0] = seg_y[0]
+    gc_mask = (seg_w > seg_y) & (prev_w <= prev_y)
+    gc_mask[0] = False
+
+    gc_indices = np.where(gc_mask)[0] + start
+    if len(gc_indices) == 0:
+        return None
+
+    last_gc_idx = gc_indices[-1]
+
+    # 金叉要"刚刚"，距今不超过 gc_max_bars
+    if ref_idx - last_gc_idx > gc_max_bars:
+        return None
+
+    # 金叉后是否有B1
+    after_gc_b1 = np.where(b1[last_gc_idx:ref_idx + 1])[0] + last_gc_idx
+    if len(after_gc_b1) == 0:
+        return None
+
+    bi = int(after_gc_b1[-1])
+    return [{
+        "idx": bi,
+        "date": str(dates[bi])[:10],
+        "price": float(C[bi]),
+        "gc_idx": int(last_gc_idx),
+    }]
+
+
 def _compute_t3_stats(C, b1_list, t3_days=NX_T3_DAYS, target_pct=NX_T3_TARGET_PCT):
     """计算每个B1信号之后T+3涨幅
 
@@ -572,6 +629,150 @@ def _exclude_gap_up_sideways_dump(C, H, O, V, nx_b1_list):
     return False
 
 
+def _exclude_s1_top_volume(C, H, O, V, nx_b1_list):
+    """排除：S1顶部放量出货
+
+    在N型B1区间内检测高位放量阴线（不依赖加速条件）：
+    - 价格处于近期高位（接近20日最高价）
+    - 巨量（>5日均量2倍）
+    - 大阴线（实体>3%）或放量长上影线
+    """
+    hhv_h20 = HHV(H, 20)
+    n = len(C)
+
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+
+        for j in range(max(s, 20), min(e + 1, n)):
+            # 高位：当前最高价接近20日最高
+            if H[j] < hhv_h20[j] * 0.97:
+                continue
+
+            # 放量：>5日均量2倍
+            avg_v5 = np.mean(V[max(0, j - 5):j])
+            if avg_v5 <= 0 or V[j] < avg_v5 * EXCLUDE_TOP_VOL_RATIO:
+                continue
+
+            # 大阴线
+            if O[j] > C[j] and (O[j] - C[j]) / O[j] * 100 > EXCLUDE_TOP_BODY_PCT:
+                return True
+
+            # 或长上影线+放量
+            upper_shadow = H[j] - max(O[j], C[j])
+            if (upper_shadow / C[j] * 100 > 3
+                    and j > s and V[j] > V[j - 1] * 1.3):
+                return True
+
+    return False
+
+
+def _exclude_discontinuous_rise(C, V, nx_b1_list):
+    """排除：拉升阶段不连续，量价忽大忽小，涨幅不多
+
+    在N型B1区间内检测：
+    - 上涨阶段阴线占比过高（拉升不连续）
+    - 量能波动大（忽大忽小）
+    - 整体涨幅不大
+    """
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+        seg_C = C[s:e + 1]
+        seg_V = V[s:e + 1]
+        if len(seg_C) < 10:
+            continue
+
+        peak_local = np.argmax(seg_C)
+        rise_C = seg_C[:peak_local + 1]
+        rise_V = seg_V[:peak_local + 1]
+        rise_len = len(rise_C)
+        if rise_len < 8:
+            continue
+
+        # 不连续：下跌日占比过高
+        down_ratio = (np.diff(rise_C) < 0).sum() / (rise_len - 1)
+        if down_ratio < EXCLUDE_DISCON_DOWN_RATIO:
+            continue
+
+        # 量能波动
+        mean_v = np.mean(rise_V)
+        if mean_v <= 0:
+            continue
+        vol_cv = np.std(rise_V) / mean_v
+
+        # 整体涨幅
+        total_gain = (rise_C[-1] - rise_C[0]) / rise_C[0] * 100
+
+        if vol_cv > EXCLUDE_DISCON_VOL_CV and total_gain < EXCLUDE_DISCON_MAX_GAIN:
+            return True
+
+    return False
+
+
+def _exclude_stepped_volume_dist(C, V, O, nx_b1_list):
+    """排除：阶梯量出货
+
+    在N型B1区间内检测阶梯式放量下跌：
+    - 价格从高点回落
+    - 后半段下跌阴线均量大于前半段（阶梯式放量出货）
+    """
+    for i in range(len(nx_b1_list) - 1):
+        s = nx_b1_list[i]["idx"]
+        e = nx_b1_list[i + 1]["idx"]
+        seg_C = C[s:e + 1]
+        seg_V = V[s:e + 1]
+        seg_O = O[s:e + 1]
+        seg_len = len(seg_C)
+        if seg_len < 10:
+            continue
+
+        peak_local = np.argmax(seg_C)
+        if peak_local >= seg_len - 5:
+            continue
+
+        after_C = seg_C[peak_local:]
+        after_V = seg_V[peak_local:]
+        after_O = seg_O[peak_local:]
+        after_len = len(after_C)
+        if after_len < 8:
+            continue
+
+        total_drop = (after_C[-1] - after_C[0]) / after_C[0] * 100
+        if total_drop > -EXCLUDE_STEP_DROP_PCT:
+            continue
+
+        mid = after_len // 2
+        first_yin = after_O[:mid] > after_C[:mid]
+        second_yin = after_O[mid:] > after_C[mid:]
+
+        if first_yin.sum() < 2 or second_yin.sum() < 2:
+            continue
+
+        first_avg = np.mean(after_V[:mid][first_yin])
+        second_avg = np.mean(after_V[mid:][second_yin])
+
+        if first_avg > 0 and second_avg > first_avg * EXCLUDE_STEP_VOL_RATIO:
+            return True
+
+    return False
+
+
+def _exclude_pre_b1_limit_down(C, O, nx_b1_list, stock_type="main"):
+    """排除：B1前5日有跌停
+
+    B1信号前EXCLUDE_LIMIT_DOWN_DAYS日内出现跌停，说明前期跌势猛烈，
+    B1可能是下跌中继而非真正低点。
+    """
+    lp = 0.80 if stock_type == "tech" else 0.90
+    for nb in nx_b1_list:
+        bi = nb["idx"]
+        for j in range(max(1, bi - EXCLUDE_LIMIT_DOWN_DAYS), bi):
+            if O[j] > 0 and C[j] <= np.round(O[j] * lp, 2):
+                return True
+    return False
+
+
 # ================================================================== #
 #  全市场选股扫描                                                       #
 # ================================================================== #
@@ -686,6 +887,10 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
             if not vol_expand_ok[bi]:
                 continue
             pattern = _find_nx_b1_pattern(b1, C, dates, ref_idx=bi)
+            # 金叉+B1回退：标准N型未命中时，尝试金叉后B1
+            if pattern is None:
+                pattern = _find_gc_b1_pattern(b1, C, dates, result["white"],
+                                              result["yellow"], ref_idx=bi)
             if pattern is not None:
                 qualifying_dates.append(str(dates[bi])[:10])
                 # 保留B1次数最多、然后缩量最佳的
@@ -706,6 +911,14 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
         if _exclude_b1_death_cross(C, result["white"], result["yellow"], best_pattern):
             return code, None
         if _exclude_gap_up_sideways_dump(C, H, O, V, best_pattern):
+            return code, None
+        if _exclude_s1_top_volume(C, H, O, V, best_pattern):
+            return code, None
+        if _exclude_discontinuous_rise(C, V, best_pattern):
+            return code, None
+        if _exclude_stepped_volume_dist(C, V, O, best_pattern):
+            return code, None
+        if _exclude_pre_b1_limit_down(C, O, best_pattern, params["stock_type"]):
             return code, None
 
         ref_idx = best_ref_idx
