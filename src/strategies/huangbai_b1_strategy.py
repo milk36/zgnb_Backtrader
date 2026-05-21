@@ -803,11 +803,17 @@ def _compute_signals(C, H, L, O, V, dates, params):
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
 
+    # 突然放巨量阴线检测
+    _hvb_arr = (V / np.maximum(REF(V, 1), 1) > 3) & (V > MA(V, 20) * 3) & (C < O) & (np.where(O > 0, (O - C) / O, 0) > 0.03)
+    no_huge_vol_bearish = not EXIST(_hvb_arr, 60)[i]
+
     if not vol_expand_ok:
         return {"weekly": True, "gc": True, "b1": False,
+                "no_huge_vol_bearish": no_huge_vol_bearish,
                 "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
     return {"weekly": True, "gc": True, "b1": b1,
+            "no_huge_vol_bearish": no_huge_vol_bearish,
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
@@ -844,7 +850,8 @@ def _scan_one(code, params, skip_weekly, skip_gc):
             return code, None, False
         weekly_ok = skip_weekly or sig["weekly"]
         gc_ok = skip_gc or sig["gc"]
-        if sig["b1"] and weekly_ok and gc_ok:
+        no_huge_vol_bearish = sig.get("no_huge_vol_bearish", True)
+        if sig["b1"] and weekly_ok and gc_ok and no_huge_vol_bearish:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -1127,6 +1134,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+    # 盈亏比过滤：奖励 >= 3倍风险 或 无风险（已在黄线上方）
+    _rr_risk = C - yellow * 0.99
+    _rr_reward = HHV(H, 60) - C
+    _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
+    b1 = b1 & _rr_ok
+
     # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
@@ -1169,6 +1182,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)
 
+    # 突然放巨量阴线检测
+    _hvb_vr = V / np.maximum(REF(V, 1), 1)
+    _hvb_body = np.where(O > 0, (O - C) / O, 0)
+    huge_vol_bearish = (_hvb_vr > 3) & (V > MA(V, 20) * 3) & (C < O) & (_hvb_body > 0.03)
+    no_huge_vol_bearish = ~EXIST(huge_vol_bearish, 60)
+
     # 筹码密集度（COST近似）
     _chip_period = 60
     _sum_cv = pd.Series(C * V).rolling(_chip_period, min_periods=1).sum().values
@@ -1197,6 +1216,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "b1": b1,
         "shrink_score": shrink_score,
         "vol_expand_ok": vol_expand_ok,
+        "huge_vol_bearish": huge_vol_bearish,
+        "no_huge_vol_bearish": no_huge_vol_bearish,
         "chip_dense": chip_dense,
         "chip_spread": _chip_spread,
         "white": white,

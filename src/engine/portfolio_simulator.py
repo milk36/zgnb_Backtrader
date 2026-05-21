@@ -264,8 +264,9 @@ class PortfolioSimulator:
                 b1_ok = sig["b1"][idx]
                 dongneng_ok = sig.get("dongneng_recent", sig.get("stock_macd_bullish", np.ones(idx + 1, dtype=bool)))[idx]
                 vol_expand_ok = sig.get("vol_expand_ok", np.ones(idx + 1, dtype=bool))[idx]
+                no_hvb = sig.get("no_huge_vol_bearish", np.ones(idx + 1, dtype=bool))[idx]
                 liutong_ok = sig.get("liutong_mask", np.ones(idx + 1, dtype=bool))[idx]
-                if gc_ok and b1_ok and dongneng_ok and vol_expand_ok and liutong_ok:
+                if gc_ok and b1_ok and dongneng_ok and vol_expand_ok and no_hvb and liutong_ok:
                     score = sig["shrink_score"][idx]
                     if np.isnan(score):
                         score = 1.0
@@ -414,6 +415,13 @@ class PortfolioSimulator:
                 if cur_idx is not None:
                     self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, price, date, "止损")
+                to_remove.append(code)
+                continue
+
+            # 巨量阴线清仓（最高优先级）
+            hvb = sig.get("huge_vol_bearish", np.zeros(idx + 1, dtype=bool))
+            if idx < len(hvb) and hvb[idx]:
+                self._sell_position(code, pos, price, date, "巨量阴线清仓")
                 to_remove.append(code)
                 continue
 
@@ -754,6 +762,13 @@ class PortfolioSimulator:
                 if cur_td_idx is not None:
                     self._cooldown[code] = cur_td_idx
                 self._sell_position(code, pos, price, date, "止损")
+                to_remove.append(code)
+                continue
+
+            # 巨量阴线清仓（最高优先级）
+            hvb = sig.get("huge_vol_bearish", np.zeros(idx + 1, dtype=bool))
+            if idx < len(hvb) and hvb[idx]:
+                self._sell_position(code, pos, price, date, "巨量阴线清仓")
                 to_remove.append(code)
                 continue
 

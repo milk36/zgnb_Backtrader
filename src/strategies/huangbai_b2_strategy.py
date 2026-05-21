@@ -181,7 +181,8 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
             return code, None, False
         weekly_ok = skip_weekly or sig["weekly"]
         vol_expand_ok = sig.get("vol_expand", True)
-        if sig["b1"] and weekly_ok and vol_expand_ok and market_macd_ok:
+        no_huge_vol_bearish = sig.get("no_huge_vol_bearish", True)
+        if sig["b1"] and weekly_ok and vol_expand_ok and no_huge_vol_bearish and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False

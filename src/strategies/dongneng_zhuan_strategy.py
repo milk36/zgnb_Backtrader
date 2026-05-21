@@ -521,6 +521,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     # 排名分数：金砖排名"下大上小"
     rank_score = np.where(final_ok, brick / np.maximum(pct_chg, 0.01), 0.0)
 
+    # 突然放巨量阴线检测
+    _hvb_vr = V / np.maximum(REF(V, 1), 1)
+    _hvb_body = np.where(O > 0, (O - C) / O, 0)
+    huge_vol_bearish = (_hvb_vr > 3) & (V > MA(V, 20) * 3) & (C < O) & (_hvb_body > 0.03)
+    no_huge_vol_bearish = ~EXIST(huge_vol_bearish, 60)
+
     return {
         "dongneng_ok": dongneng_ok,
         "dongneng_recent": dongneng_recent,
@@ -540,6 +546,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
         "yellow": yellow,
         "white": white,
         "chip_dense": chip_dense,
+        "huge_vol_bearish": huge_vol_bearish,
+        "no_huge_vol_bearish": no_huge_vol_bearish,
     }
 
 
@@ -610,14 +618,30 @@ def _scan_one(code, params):
         capital_data = params.get("capital_data")
         if capital_data:
             stock_params["capital_shares"] = capital_data.get(code)
-        sig = _compute_signals(
+        signals = _compute_all_bar_signals(
             df["close"].values.astype(float),
             df["high"].values.astype(float),
             df["low"].values.astype(float),
             df["open"].values.astype(float),
             df["volume"].values.astype(float),
             df.index, code, stock_params)
-        if sig is not None and sig["any"]:
+        if signals is None:
+            return code, None, False
+        i = len(df) - 1
+        sig = {
+            "code": code,
+            "dongneng": bool(signals["dongneng_ok"][i]),
+            "jinzhuan": bool(signals["jinzhuan_ok"][i]),
+            "any": bool(signals["any_ok"][i]),
+            "no_huge_vol_bearish": bool(signals["no_huge_vol_bearish"][i]),
+            "close": float(signals["close"][i]),
+            "pct_change": float(signals["pct_change"][i]),
+            "brick": float(signals["brick_value"][i]),
+            "base_mom": float(signals["base_mom"][i]),
+            "visual_score": float(signals["visual_score"][i]),
+            "rank_score": float(signals["rank_score"][i]),
+        }
+        if sig["any"] and sig["no_huge_vol_bearish"]:
             return code, sig, False
         return code, None, False
     except Exception:

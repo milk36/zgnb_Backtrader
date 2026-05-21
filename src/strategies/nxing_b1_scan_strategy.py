@@ -265,6 +265,12 @@ def _compute_all_bar_b1_and_filters(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+    # 盈亏比过滤：和前期高点对比 reward/risk >= 3
+    _rr_risk = C - yellow * 0.99
+    _rr_reward = HHV(H, 60) - C
+    _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
+    b1 = b1 & _rr_ok
+
     # vol_expand_ok 过滤链
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
     _vep, _vem = HUANGBAI_VOL_EXPAND_PERIOD, HUANGBAI_VOL_EXPAND_MIN
@@ -313,6 +319,12 @@ def _compute_all_bar_b1_and_filters(C, H, L, O, V, dates, params):
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)
 
+    # 突然放巨量阴线检测
+    _hvb_vr = V / np.maximum(REF(V, 1), 1)
+    _hvb_body = np.where(O > 0, (O - C) / O, 0)
+    huge_vol_bearish = (_hvb_vr > 3) & (V > MA(V, 20) * 3) & (C < O) & (_hvb_body > 0.03)
+    no_huge_vol_bearish = ~EXIST(huge_vol_bearish, 60)
+
     return {
         "b1": b1,
         "vol_expand_ok": vol_expand_ok,
@@ -322,6 +334,8 @@ def _compute_all_bar_b1_and_filters(C, H, L, O, V, dates, params):
         "shrink_score": shrink_score,
         "J": J,
         "rsi": rsi,
+        "huge_vol_bearish": huge_vol_bearish,
+        "no_huge_vol_bearish": no_huge_vol_bearish,
     }
 
 
@@ -758,17 +772,34 @@ def _exclude_stepped_volume_dist(C, V, O, nx_b1_list):
     return False
 
 
-def _exclude_pre_b1_limit_down(C, O, nx_b1_list, stock_type="main"):
-    """排除：B1前5日有跌停
+def _is_limit_down_price(close_price, prev_close, code):
+    """判断收盘价是否为跌停价
+
+    同时检查所有可能的跌停比例（5%/10%/20%），因为：
+    - ST股可能已摘帽但历史数据仍是5%跌停
+    - 北交所也是5%跌停
+    - 宁可误判（跳过一只股票）不可漏判（买入跌停股）
+    """
+    if prev_close <= 0:
+        return False
+    _is_tech = code[:2] in ("30", "68")
+    ld_ratios = [0.95, 0.80 if _is_tech else 0.90]
+    for r in ld_ratios:
+        if abs(close_price - round(prev_close * r, 2)) < 0.01:
+            return True
+    return False
+
+
+def _exclude_pre_b1_limit_down(C, O, nx_b1_list, stock_type="main", code=""):
+    """排除：B1前5日有跌停（含ST 5%跌停）
 
     B1信号前EXCLUDE_LIMIT_DOWN_DAYS日内出现跌停，说明前期跌势猛烈，
     B1可能是下跌中继而非真正低点。
     """
-    lp = 0.80 if stock_type == "tech" else 0.90
     for nb in nx_b1_list:
         bi = nb["idx"]
         for j in range(max(1, bi - EXCLUDE_LIMIT_DOWN_DAYS), bi):
-            if O[j] > 0 and C[j] <= np.round(O[j] * lp, 2):
+            if _is_limit_down_price(C[j], C[j - 1], code):
                 return True
     return False
 
@@ -876,6 +907,7 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
 
         b1 = result["b1"]
         vol_expand_ok = result["vol_expand_ok"]
+        no_huge_vol_bearish = result["no_huge_vol_bearish"]
 
         # 在搜索区间内的B1信号日滚动检测N型结构
         b1_in_range = np.where(b1[start_idx:end_idx + 1])[0] + start_idx
@@ -885,6 +917,11 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
 
         for bi in b1_in_range:
             if not vol_expand_ok[bi]:
+                continue
+            if not no_huge_vol_bearish[bi]:
+                continue
+            # B1当天跌停排除（含ST 5%）
+            if bi >= 1 and _is_limit_down_price(C[bi], C[bi - 1], code):
                 continue
             pattern = _find_nx_b1_pattern(b1, C, dates, ref_idx=bi)
             # 金叉+B1回退：标准N型未命中时，尝试金叉后B1
@@ -918,7 +955,7 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
             return code, None
         if _exclude_stepped_volume_dist(C, V, O, best_pattern):
             return code, None
-        if _exclude_pre_b1_limit_down(C, O, best_pattern, params["stock_type"]):
+        if _exclude_pre_b1_limit_down(C, O, best_pattern, params["stock_type"], code):
             return code, None
 
         ref_idx = best_ref_idx
@@ -996,6 +1033,7 @@ def _scan_one_all_bars_nx(code, params):
 
         b1_raw = result["b1"]
         veo = result["vol_expand_ok"]
+        no_huge_vol_bearish = result["no_huge_vol_bearish"]
 
         # 对每个B1日检测N型+排除过滤
         nx_b1_signal = np.zeros(len(b1_raw), dtype=bool)
@@ -1003,6 +1041,11 @@ def _scan_one_all_bars_nx(code, params):
 
         for bi in b1_indices:
             if not veo[bi]:
+                continue
+            if not no_huge_vol_bearish[bi]:
+                continue
+            # B1当天跌停排除（含ST 5%）
+            if bi >= 1 and _is_limit_down_price(C[bi], C[bi - 1], code):
                 continue
             # 流通市值过滤
             cap = capital_shares * C[bi] / 10000
@@ -1030,7 +1073,7 @@ def _scan_one_all_bars_nx(code, params):
                 continue
             if _exclude_stepped_volume_dist(C, V, O, pattern):
                 continue
-            if _exclude_pre_b1_limit_down(C, O, pattern, params["stock_type"]):
+            if _exclude_pre_b1_limit_down(C, O, pattern, params["stock_type"], code):
                 continue
             nx_b1_signal[bi] = True
 

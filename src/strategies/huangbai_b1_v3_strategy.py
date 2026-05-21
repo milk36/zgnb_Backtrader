@@ -24,7 +24,7 @@ import backtrader as bt
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 from MyTT import EMA, MA, SMA, HHV, LLV, REF, COUNT, CROSS, MAX, ABS, \
-    BARSLAST, HHVBARS
+    BARSLAST, HHVBARS, EXIST
 from mootdx.reader import Reader
 from src.indicators.kdj_indicator import KDJIndicator
 from src.strategies.base_strategy import BaseStrategy
@@ -153,6 +153,13 @@ def _compute_v3_b1(C, H, L, O, V, skip_mvok=True):
 
     # B1 最终条件
     b1 = (HMSHORTWL >= HMLONGYL * 0.985) & (C >= HMLONGYL * 0.985) & A1
+
+    # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
+    yellow = (MA(C, 14) + MA(C, 28) + MA(C, 57) + MA(C, 114)) / 4
+    _rr_risk = C - yellow * 0.99
+    _rr_reward = HHV(H, 60) - C
+    _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
+    b1 = b1 & _rr_ok
 
     # 缩量评分（候选排序用）
     hhv_v20 = HHV(V, 20)
@@ -567,13 +574,19 @@ def _compute_signals(C, H, L, O, V, dates, params):
     b1_ok = bool(b1_arr[i])
     shrink_score = float(shrink_arr[i])
 
+    # 突然放巨量阴线检测
+    _hvb_arr = (V / np.maximum(REF(V, 1), 1) > 3) & (V > MA(V, 20) * 3) & (C < O) & (np.where(O > 0, (O - C) / O, 0) > 0.03)
+    no_huge_vol_bearish = not EXIST(_hvb_arr, 60)[i]
+
     if not (weekly_ok and above_ma30w and gc_ok and b1_ok):
         return {"weekly": weekly_ok and above_ma30w, "gc": gc_ok,
                 "market_macd": True, "b1": b1_ok,
+                "no_huge_vol_bearish": no_huge_vol_bearish,
                 "close": C[i], "J": J_arr[i],
                 "shrink_score": shrink_score}
 
     return {"weekly": True, "gc": True, "market_macd": True, "b1": b1_ok,
+            "no_huge_vol_bearish": no_huge_vol_bearish,
             "close": C[i], "J": J_arr[i], "shrink_score": shrink_score}
 
 
@@ -606,7 +619,8 @@ def _scan_one(code, params, skip_weekly, skip_gc, market_macd_ok=True):
             return code, None, False
         weekly_ok = skip_weekly or sig["weekly"]
         gc_ok = skip_gc or sig["gc"]
-        if sig["b1"] and weekly_ok and gc_ok and market_macd_ok:
+        no_huge_vol_bearish = sig.get("no_huge_vol_bearish", True)
+        if sig["b1"] and weekly_ok and gc_ok and no_huge_vol_bearish and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -767,6 +781,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)
 
+    # 突然放巨量阴线检测
+    _hvb_vr = V / np.maximum(REF(V, 1), 1)
+    _hvb_body = np.where(O > 0, (O - C) / O, 0)
+    huge_vol_bearish = (_hvb_vr > 3) & (V > MA(V, 20) * 3) & (C < O) & (_hvb_body > 0.03)
+    no_huge_vol_bearish = ~EXIST(huge_vol_bearish, 60)
+
     # 筹码密集度（COST近似）
     _chip_period = 60
     _sum_cv = pd.Series(C * V).rolling(_chip_period, min_periods=1).sum().values
@@ -795,6 +815,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "b1": b1,
         "shrink_score": shrink_score,
         "vol_expand_ok": vol_expand_ok,
+        "huge_vol_bearish": huge_vol_bearish,
+        "no_huge_vol_bearish": no_huge_vol_bearish,
         "chip_dense": chip_dense,
         "chip_spread": _chip_spread,
         "white": white,

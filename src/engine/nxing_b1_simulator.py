@@ -169,7 +169,8 @@ class NxingB1Simulator:
             try:
                 b1_ok = sig["b1"][idx]
                 veo = sig.get("vol_expand_ok", np.ones(idx + 1, dtype=bool))[idx]
-                if not (b1_ok and veo):
+                no_hvb = sig.get("no_huge_vol_bearish", np.ones(idx + 1, dtype=bool))[idx]
+                if not (b1_ok and veo and no_hvb):
                     continue
                 score = sig["shrink_score"][idx]
                 if np.isnan(score):
@@ -302,6 +303,13 @@ class NxingB1Simulator:
                 if cur_idx is not None:
                     self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, price, date, "止损")
+                to_remove.append(code)
+                continue
+
+            # 巨量阴线清仓（最高优先级）
+            hvb = sig.get("huge_vol_bearish", np.zeros(idx + 1, dtype=bool))
+            if idx < len(hvb) and hvb[idx]:
+                self._sell_position(code, pos, price, date, "巨量阴线清仓")
                 to_remove.append(code)
                 continue
 

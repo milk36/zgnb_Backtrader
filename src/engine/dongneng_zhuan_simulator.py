@@ -303,6 +303,9 @@ class DongnengZhuanSimulator:
             try:
                 if not sig["any_ok"][idx]:
                     continue
+                no_hvb = sig.get("no_huge_vol_bearish", np.ones(idx + 1, dtype=bool))[idx]
+                if not no_hvb:
+                    continue
                 score = sig["rank_score"][idx]
                 if np.isnan(score) or score <= 0:
                     continue
@@ -415,6 +418,13 @@ class DongnengZhuanSimulator:
             if daily_close <= pos.stop_loss:
                 self._cooldown[code] = cur_idx
                 self._sell_position(code, pos, daily_close, date, "止损")
+                to_remove.append(code)
+                continue
+
+            # 巨量阴线清仓（最高优先级）
+            hvb = sig.get("huge_vol_bearish", np.zeros(idx + 1, dtype=bool))
+            if idx < len(hvb) and hvb[idx]:
+                self._sell_position(code, pos, daily_close, date, "巨量阴线清仓")
                 to_remove.append(code)
                 continue
 

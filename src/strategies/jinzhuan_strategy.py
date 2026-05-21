@@ -125,10 +125,19 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
 
     final_ok = jinzhuan_ok & no_s1_recent & no_gap_recent & prev_shrink & liutong_mask
 
+    # 突然放巨量阴线检测
+    _hvb_vr = V / np.maximum(REF(V, 1), 1)
+    _hvb_body = np.where(O > 0, (O - C) / O, 0)
+    huge_vol_bearish = (_hvb_vr > 3) & (V > MA(V, 20) * 3) & (C < O) & (_hvb_body > 0.03)
+    no_huge_vol_bearish = ~EXIST(huge_vol_bearish, 60)
+    final_ok = final_ok & no_huge_vol_bearish
+
     signals["any_ok"] = final_ok
     pct_chg = signals["pct_change"]
     brick = signals["brick_value"]
     signals["rank_score"] = np.where(final_ok, brick / np.maximum(pct_chg, 0.01), 0.0)
+    signals["huge_vol_bearish"] = huge_vol_bearish
+    signals["no_huge_vol_bearish"] = no_huge_vol_bearish
 
     return signals
 

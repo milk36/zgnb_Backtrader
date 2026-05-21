@@ -860,10 +860,15 @@ def _compute_signals(C, H, L, O, V, dates, params):
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
 
+    # 突然放巨量阴线检测
+    _hvb_arr = (V / np.maximum(REF(V, 1), 1) > 3) & (V > MA(V, 20) * 3) & (C < O) & (np.where(O > 0, (O - C) / O, 0) > 0.03)
+    no_huge_vol_bearish = not EXIST(_hvb_arr, 60)[i]
+
     if not (weekly_ok and above_ma30w and stock_macd_ok and vol_expand_ok):
         return {"weekly": weekly_ok and above_ma30w,
                 "market_macd": True, "b1": False, "stock_macd": stock_macd_ok,
                 "vol_expand": vol_expand_ok,
+                "no_huge_vol_bearish": no_huge_vol_bearish,
                 "close": C[i], "J": J[i], "RSI": rsi[i],
                 "shrink_score": 0}
 
@@ -984,6 +989,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
 
     return {"weekly": True, "gc": True, "market_macd": True, "b1": b1,
             "stock_macd": stock_macd_ok, "vol_expand": vol_expand_ok,
+            "no_huge_vol_bearish": no_huge_vol_bearish,
             "close": C[i], "J": J[i], "RSI": rsi[i], "shrink_score": shrink_score}
 
 
@@ -1021,7 +1027,8 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
         weekly_ok = skip_weekly or sig["weekly"]
         stock_macd_ok = sig.get("stock_macd", True)
         vol_expand_ok = sig.get("vol_expand", True)
-        if sig["b1"] and weekly_ok and stock_macd_ok and vol_expand_ok and market_macd_ok:
+        no_huge_vol_bearish = sig.get("no_huge_vol_bearish", True)
+        if sig["b1"] and weekly_ok and stock_macd_ok and vol_expand_ok and no_huge_vol_bearish and market_macd_ok:
             sig["code"] = code
             return code, sig, False
         return code, None, False
@@ -1299,6 +1306,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+    # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
+    _rr_risk = C - yellow * 0.99
+    _rr_reward = HHV(H, 60) - C
+    _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
+    b1 = b1 & _rr_ok
+
     # 个股MACD多头过滤（暂未启用，预留接口）
     stock_macd_bullish = np.ones(len(C), dtype=bool)
 
@@ -1344,6 +1357,12 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)
 
+    # 突然放巨量阴线检测
+    _hvb_vr = V / np.maximum(REF(V, 1), 1)
+    _hvb_body = np.where(O > 0, (O - C) / O, 0)
+    huge_vol_bearish = (_hvb_vr > 3) & (V > MA(V, 20) * 3) & (C < O) & (_hvb_body > 0.03)
+    no_huge_vol_bearish = ~EXIST(huge_vol_bearish, 60)
+
     # 筹码密集度（COST近似）
     _chip_period = 60
     _sum_cv = pd.Series(C * V).rolling(_chip_period, min_periods=1).sum().values
@@ -1373,6 +1392,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
         "shrink_score": shrink_score,
         "stock_macd_bullish": stock_macd_bullish,
         "vol_expand_ok": vol_expand_ok,
+        "huge_vol_bearish": huge_vol_bearish,
+        "no_huge_vol_bearish": no_huge_vol_bearish,
         "chip_dense": chip_dense,
         "chip_spread": _chip_spread,
         "white": white,

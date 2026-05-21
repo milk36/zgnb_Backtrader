@@ -202,7 +202,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, code, params):
     else:
         liutong_mask = np.ones(n, dtype=bool)
 
-    nxing_ok = jinzhuan_ok & nxing_pattern & liutong_mask
+    nxing_ok = jinzhuan_ok & nxing_pattern & liutong_mask & signals["no_huge_vol_bearish"]
 
     # Override final signals
     signals["any_ok"] = nxing_ok

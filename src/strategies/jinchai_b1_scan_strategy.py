@@ -50,14 +50,70 @@ from src.strategies.nxing_b1_scan_strategy import (
     _exclude_discontinuous_rise,
     _exclude_stepped_volume_dist,
     _exclude_pre_b1_limit_down,
+    _is_limit_down_price,
     _get_all_codes,
 )
+
+from MyTT import HHV
 
 # ---------- 金叉B1参数 ----------
 JCB1_GC_MAX_BARS = 30       # 金叉距今最大bar数（"刚刚金叉"）
 JCB1_LOOKBACK = 60          # 回看天数
 JCB1_T5_DAYS = 5            # T+5统计天数
 JCB1_T5_TARGET_PCT = 10.0   # T+5涨幅目标(%)
+JCB1_MIN_RISK_REWARD = 3.0  # 最低盈亏比
+JCB1_CROSS_LOOKBACK = 120   # 反复交叉检测回看天数
+JCB1_MAX_CROSS_CYCLES = 1   # 最大允许交叉周期数（超过则排除）
+
+# ================================================================== #
+#  盈亏比 + 反复交叉过滤                                                 #
+# ================================================================== #
+
+def _check_risk_reward(C, H, yellow, ref_idx, min_ratio=JCB1_MIN_RISK_REWARD):
+    """检查盈亏比：reward/risk >= min_ratio
+
+    risk = 当前价 - 止损价（黄线*0.99）
+    reward = 60日最高价 - 当前价
+    """
+    price = float(C[ref_idx])
+    stop_loss = float(yellow[ref_idx]) * 0.99
+    risk = price - stop_loss
+    if risk <= 0:
+        return False
+    hhv60 = HHV(H, 60)
+    target = float(hhv60[ref_idx])
+    reward = target - price
+    if reward <= 0:
+        return False
+    return reward / risk >= min_ratio
+
+
+def _exclude_repeated_cross(white, yellow, gc_idx, lookback=JCB1_CROSS_LOOKBACK,
+                            max_cycles=JCB1_MAX_CROSS_CYCLES):
+    """排除：前期白线黄线反复交叉的股票
+
+    在金叉点之前回看lookback天，统计完整的交叉周期数
+    （金叉→死叉→金叉算1个完整周期），超过max_cycles则排除。
+    """
+    if gc_idx is None or gc_idx < lookback:
+        start = 0
+    else:
+        start = gc_idx - lookback
+    seg_w = white[start:gc_idx + 1]
+    seg_y = yellow[start:gc_idx + 1]
+    if len(seg_w) < 10:
+        return False
+
+    above = seg_w >= seg_y
+    cross_count = 0
+    for i in range(1, len(above)):
+        if above[i] != above[i - 1]:
+            cross_count += 1
+
+    # 每个完整周期 = 金叉+死叉 = 2次交叉
+    cycles = cross_count // 2
+    return cycles > max_cycles
+
 
 # ---------- 进程池全局变量 ----------
 _jc_reader = None
@@ -131,6 +187,7 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
 
         b1 = result["b1"]
         vol_expand_ok = result["vol_expand_ok"]
+        no_huge_vol_bearish = result.get("no_huge_vol_bearish")
 
         # 在日期区间内的B1信号日检测金叉+B1模式
         b1_in_range = np.where(b1[start_idx:end_idx + 1])[0] + start_idx
@@ -140,6 +197,14 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
 
         for bi in b1_in_range:
             if not vol_expand_ok[bi]:
+                continue
+            if no_huge_vol_bearish is not None and not no_huge_vol_bearish[bi]:
+                continue
+            # B1当天跌停则跳过（根据名称精确判断ST状态）
+            if bi >= 1 and _is_limit_down_price(C[bi], C[bi - 1], code):
+                continue
+            # 盈亏比 < 3 则跳过
+            if not _check_risk_reward(C, H, result["yellow"], bi):
                 continue
             pattern = _find_gc_b1_pattern(
                 b1, C, dates, result["white"], result["yellow"],
@@ -169,6 +234,11 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
         if _exclude_stepped_volume_dist(C, V, O, best_pattern):
             return code, None
         if _exclude_pre_b1_limit_down(C, O, best_pattern, params["stock_type"]):
+            return code, None
+
+        # 反复交叉过滤（用金叉点作为参考）
+        gc_idx_check = best_pattern[0].get("gc_idx")
+        if _exclude_repeated_cross(result["white"], result["yellow"], gc_idx_check):
             return code, None
 
         ref_idx = best_ref_idx
