@@ -58,6 +58,12 @@ PORTFOLIO_INITIAL_CASH = 1_000_000   # 100万
 PORTFOLIO_MAX_POSITIONS = 10         # 最多10只
 PORTFOLIO_PER_POSITION = 100_000     # 每只10万
 
+# N型B1组合模拟参数
+NXB1_INITIAL_CASH = 1_000_000       # 100万
+NXB1_MAX_POSITIONS = 10              # 最多10只
+NXB1_PER_POSITION = 100_000          # 每只10万
+NXB1_T_PLUS_N = 3                    # T+N天不涨清仓
+
 # 动能砖组合模拟参数
 DNZH_INITIAL_CASH = 100_000          # 10万
 DNZH_MAX_POSITIONS = 2               # 最多2只

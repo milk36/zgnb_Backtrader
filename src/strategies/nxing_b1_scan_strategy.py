@@ -960,8 +960,161 @@ def _scan_one_stock(code, params, start_date=None, end_date=None):
         return code, {"error": str(e)}
 
 
-def scan_all(stock_type="main", tdxdir=TDX_DIR, market=TDX_MARKET,
-             max_workers=SCAN_MAX_WORKERS, start_date=None, end_date=None):
+# ================================================================== #
+#  组合模拟预加载（全bar信号，含N型检测+排除过滤）                      #
+# ================================================================== #
+
+def _scan_one_all_bars_nx(code, params):
+    """预加载单只股票全部bar的N型B1信号
+
+    对每个B1日运行N型检测+8项排除过滤，生成 nx_b1_signal 布尔数组。
+    返回的 b1 字段含义为"该日N型B1入场有效"。
+    """
+    assert _process_reader is not None
+    try:
+        df = _process_reader.daily(symbol=code)
+        if df is None or len(df) < 300:
+            return code, None
+        df = df.sort_index()
+        from src.data.adjustment import apply_qfq
+        df = apply_qfq(df, code)
+
+        C = df["close"].values.astype(float)
+        H = df["high"].values.astype(float)
+        L = df["low"].values.astype(float)
+        O = df["open"].values.astype(float)
+        V = df["vol"].values.astype(float) if "vol" in df.columns else df["volume"].values.astype(float)
+        dates = df.index
+
+        capital_shares = _process_capital.get(code, 0) if _process_capital else 0
+        if capital_shares <= 0:
+            return code, None
+
+        result = _compute_all_bar_b1_and_filters(C, H, L, O, V, dates, params)
+        if result is None:
+            return code, None
+
+        b1_raw = result["b1"]
+        veo = result["vol_expand_ok"]
+
+        # 对每个B1日检测N型+排除过滤
+        nx_b1_signal = np.zeros(len(b1_raw), dtype=bool)
+        b1_indices = np.where(b1_raw)[0]
+
+        for bi in b1_indices:
+            if not veo[bi]:
+                continue
+            # 流通市值过滤
+            cap = capital_shares * C[bi] / 10000
+            if cap < DNZH_MIN_MARKET_CAP:
+                continue
+            # N型检测
+            pattern = _find_nx_b1_pattern(b1_raw, C, dates, ref_idx=bi)
+            if pattern is None:
+                pattern = _find_gc_b1_pattern(b1_raw, C, dates,
+                                              result["white"], result["yellow"], ref_idx=bi)
+            if pattern is None:
+                continue
+            # 8项排除过滤
+            if _exclude_rapid_rise_flat_dist(C, V, pattern):
+                continue
+            if _exclude_irregular_rise(C, V, pattern):
+                continue
+            if _exclude_b1_death_cross(C, result["white"], result["yellow"], pattern):
+                continue
+            if _exclude_gap_up_sideways_dump(C, H, O, V, pattern):
+                continue
+            if _exclude_s1_top_volume(C, H, O, V, pattern):
+                continue
+            if _exclude_discontinuous_rise(C, V, pattern):
+                continue
+            if _exclude_stepped_volume_dist(C, V, O, pattern):
+                continue
+            if _exclude_pre_b1_limit_down(C, O, pattern, params["stock_type"]):
+                continue
+            nx_b1_signal[bi] = True
+
+        if not nx_b1_signal.any():
+            return code, None
+
+        return code, {
+            "close": C, "high": H, "low": L, "open": O, "volume": V,
+            "dates": dates,
+            "white": result["white"],
+            "yellow": result["yellow"],
+            "b1": nx_b1_signal,
+            "vol_expand_ok": veo,
+            "shrink_score": result["shrink_score"],
+            "J": result["J"],
+            "rsi": result["rsi"],
+        }
+    except Exception:
+        return code, None
+
+
+def preload_all_signals(start="2024-01-01", end="2025-12-31",
+                        stock_type="main", max_workers=SCAN_MAX_WORKERS,
+                        tdxdir=TDX_DIR, market=TDX_MARKET):
+    """预加载全市场N型B1信号（供组合模拟器使用）
+
+    Returns:
+        (all_signals, trading_days)
+        all_signals: dict {code: {close, open, high, low, volume, dates, white, yellow, b1, ...}}
+        trading_days: pd.DatetimeIndex
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    capital_data = _load_capital_data(tdxdir)
+    if capital_data is None:
+        print("  错误: 无法加载流通市值数据")
+        return {}, pd.DatetimeIndex([])
+
+    codes = _get_all_codes(tdxdir)
+    total = len(codes)
+    print(f"  预加载 {total} 只股票的N型B1信号... (workers={max_workers or 'auto'})")
+
+    params = {
+        "m1": HUANGBAI_M1, "m2": HUANGBAI_M2,
+        "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
+        "n": HUANGBAI_N, "m": HUANGBAI_M,
+        "n1": HUANGBAI_N1, "n2": HUANGBAI_N2,
+        "stock_type": stock_type,
+    }
+
+    all_signals = {}
+    done = 0
+    t0 = time.time()
+
+    with ProcessPoolExecutor(max_workers=max_workers,
+                              initializer=_init_process,
+                              initargs=(tdxdir, market, capital_data)) as pool:
+        futures = {pool.submit(_scan_one_all_bars_nx, code, params): code for code in codes}
+        for future in as_completed(futures):
+            code, sig = future.result()
+            done += 1
+            if sig is not None:
+                all_signals[code] = sig
+            if done % 500 == 0:
+                print(f"  ... 已加载 {done}/{total}  "
+                      f"有效 {len(all_signals)}  耗时 {time.time()-t0:.1f}s")
+
+    # 构建统一交易日历
+    all_dates = set()
+    for sig in all_signals.values():
+        all_dates.update(sig["dates"])
+    trading_days = pd.DatetimeIndex(sorted(all_dates))
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    trading_days = trading_days[(trading_days >= start_ts) & (trading_days <= end_ts)]
+
+    elapsed = time.time() - t0
+    print(f"  预加载完成: {len(all_signals)}/{total} 只  "
+          f"交易日 {len(trading_days)} 天  耗时 {elapsed:.1f}s")
+    return all_signals, trading_days
+
+
+def scan_all_nx_b1(stock_type=STOCK_TYPE, tdxdir=TDX_DIR, market=TDX_MARKET,
+                   max_workers=SCAN_MAX_WORKERS, start_date=None, end_date=None):
     """N型B1全市场扫描
 
     Args:

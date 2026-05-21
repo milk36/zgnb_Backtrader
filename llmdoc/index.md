@@ -19,8 +19,9 @@
 
 - [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛→筹码密集过滤的串行过滤策略，包含综合天命打分、阵营过滤、流通市值过滤、砖型图强红共振（含前日缩量/大涨横盘放量/砖块质量三个附加条件）、60日VWAP筹码密集、T+1开盘买入及三级退出逻辑。
 - [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、T+1合规检查、五级退出（止损→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、模拟结束强制清仓、MinuteFeed分钟数据支持。通过 strategy_tag 和参数差异化，N型砖策略复用同一模拟器。
+- [引擎层：N型B1组合级模拟器](feature/engine-nxing-b1-simulator.md): NxingB1Simulator 日频模拟引擎，复用PortfolioSimulator六级退出逻辑，100万/10只/每只10万，T+1开盘价买入，按缩量评分升序取最优1只，冷却期10个交易日。涉及N型B1组合模拟回测时参考。
 - [策略层：N型+砖策略](feature/strategy-nxing-zhuan.md): 动能砖的变体策略，仅使用金砖共振信号选股（跳过动能预过滤和筹码密集过滤），外加流通市值>50亿过滤。T+1日线开盘买入（无分钟确认），复用 DongnengZhuanSimulator 模拟器。
-- [策略层：N型B1选股策略](feature/strategy-nxing-b1-scan.md): 纯选股扫描策略（不做买卖），60日内>=2次B1信号（间隔>=30天）且价格逐次抬高的N型结构筛选，复用V4的B1七子条件和vol_expand_ok过滤链，流通市值>50亿过滤，统计T+3涨幅>=10%胜率，自动生成K线图。
+- [策略层：N型B1选股策略](feature/strategy-nxing-b1-scan.md): N型B1策略支持选股扫描和组合级模拟两种模式。选股扫描：60日内>=2次B1信号（间隔>=30天）且价格逐次抬高的N型结构筛选，统计T+3涨幅胜率。组合模拟：预加载全市场N型B1信号，100万/10只/每只10万，T+1开盘买入，六级退出。复用V4的B1七子条件和vol_expand_ok过滤链。
 
 ## SOP Documents
 

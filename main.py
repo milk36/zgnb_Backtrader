@@ -56,6 +56,10 @@ from config import (
     JZH_LIMIT_UP_EXIT,
     LOG_DIR,
     MARKET_INDEX_CODE,
+    NXB1_INITIAL_CASH,
+    NXB1_MAX_POSITIONS,
+    NXB1_PER_POSITION,
+    NXB1_T_PLUS_N,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
@@ -70,7 +74,10 @@ from src.strategies.nxing_zhuan_strategy import scan_all as scan_all_nxzh
 from src.strategies.jinzhuan_strategy import scan_all as scan_all_jzh
 from src.strategies.huangbai_b2_strategy import scan_all as scan_all_b2
 from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
-from src.strategies.nxing_b1_scan_strategy import scan_all as scan_all_nx_b1
+from src.strategies.nxing_b1_scan_strategy import (
+    scan_all as scan_all_nx_b1,
+    preload_all_signals as preload_nx_b1,
+)
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -84,7 +91,7 @@ STRATEGIES = {
     "jinzhuan": None,        # 仅支持组合级模拟，不支持单股回测
     "huangbai_b2": None,     # B2倍量柱：仅支持组合级模拟+扫描
     "huangbai_b2_v2": None,  # B2_V2倍量柱：30日B1频次过滤，仅支持组合级模拟+扫描
-    "nxing_b1": None,       # N型B1选股：纯选股+图表，不做买卖
+    "nxing_b1": None,       # N型B1选股：组合级模拟+扫描，不支持单股回测
 }
 
 
@@ -369,13 +376,56 @@ def main():
 
     # ---- N型B1选股策略 ----
     if args.strategy == "nxing_b1":
+        if args.scan_only:
+            print("=" * 55)
+            print("  N型B1 全市场选股扫描")
+            print("  条件: 60日≥2次B1(间隔≥30天) + 价格逐次抬高 + 市值>50亿")
+            print(f"  区间: {args.start} ~ {args.end}")
+            print("=" * 55)
+            scan_all_nx_b1(stock_type=args.stock_type,
+                           start_date=args.start, end_date=args.end)
+            return
+
+        from src.engine.nxing_b1_simulator import NxingB1Simulator
+
         print("=" * 55)
-        print("  N型B1 全市场选股扫描")
+        print("  N型B1 组合级模拟回测")
         print("  条件: 60日≥2次B1(间隔≥30天) + 价格逐次抬高 + 市值>50亿")
-        print(f"  区间: {args.start} ~ {args.end}")
+        print("  阶段1: 预加载全市场信号数据")
         print("=" * 55)
-        scan_all_nx_b1(stock_type=args.stock_type,
-                       start_date=args.start, end_date=args.end)
+        all_signals, trading_days = preload_nx_b1(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: N型B1组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {NXB1_INITIAL_CASH:,.0f}  "
+              f"最多 {NXB1_MAX_POSITIONS} 只  "
+              f"每只 {NXB1_PER_POSITION:,.0f}")
+        print(f"{'=' * 55}")
+
+        sim = NxingB1Simulator(
+            all_signals, trading_days,
+            initial_cash=NXB1_INITIAL_CASH,
+            max_positions=NXB1_MAX_POSITIONS,
+            per_position_cash=NXB1_PER_POSITION,
+            commission=COMMISSION,
+            t_plus_n=NXB1_T_PLUS_N,
+            strategy_tag="[NXB1]",
+        )
+        sim.run()
+
+        report = sim.report()
+        NxingB1Simulator.print_report(report, sim._log_file, strategy_tag="[NXB1]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals)
         return
 
     # ---- B2 倍量柱策略 ----
