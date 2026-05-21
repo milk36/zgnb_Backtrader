@@ -262,6 +262,9 @@ class DongnengZhuanSimulator:
 
             low_val = sig["low"][idx]
             stop_loss = round(buy_price * (1 - self._stop_loss_pct / 100), 2)
+            min_sl = round(buy_price * 0.97, 2)
+            if stop_loss > min_sl:
+                stop_loss = min_sl
             pos = Position(
                 code=code, buy_date=date, buy_price=buy_price,
                 buy_low=low_val, stop_loss=stop_loss, size=shares)

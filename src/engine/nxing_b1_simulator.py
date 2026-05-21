@@ -241,6 +241,9 @@ class NxingB1Simulator:
                 sl = yellow_val * 0.99
             if sl > price:
                 sl = price * 0.95
+            min_sl = round(price * 0.97, 2)
+            if sl > min_sl:
+                sl = min_sl
 
             pos = Position(
                 code=code, buy_date=date, buy_price=price,
@@ -313,13 +316,14 @@ class NxingB1Simulator:
                 to_remove.append(code)
                 continue
 
-            # 2. 跌破黄线清仓
+            # 2. 跌破黄线清仓（亏损不足3%时跳过）
             if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy and not pos.partial_sold):
-                if cur_idx is not None:
-                    self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, price, date, "跌破黄线清仓")
-                to_remove.append(code)
-                continue
+                if price < pos.buy_price * 0.97:
+                    if cur_idx is not None:
+                        self._cooldown[code] = cur_idx
+                    self._sell_position(code, pos, price, date, "跌破黄线清仓")
+                    to_remove.append(code)
+                    continue
 
             # 3. T+N 不涨清仓
             if days_held >= self._t_plus_n and price <= avg_cost:

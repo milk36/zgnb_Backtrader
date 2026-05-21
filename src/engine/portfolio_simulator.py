@@ -335,6 +335,9 @@ class PortfolioSimulator:
                 sl = yellow_val * 0.99
         if sl > price:
             sl = price * 0.95
+        min_sl = round(price * 0.97, 2)
+        if sl > min_sl:
+            sl = min_sl
 
         pos = Position(
             code=code, buy_date=date, buy_price=price,
@@ -425,14 +428,15 @@ class PortfolioSimulator:
                 to_remove.append(code)
                 continue
 
-            # 1.5 跌破黄线清仓（黄线以下建仓且未部分止盈时跳过）
+            # 1.5 跌破黄线清仓（黄线以下建仓且未部分止盈时跳过；亏损不足3%时跳过）
             if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy and not pos.partial_sold):
-                cur_idx = self._td_index.get(date)
-                if cur_idx is not None:
-                    self._cooldown[code] = cur_idx
-                self._sell_position(code, pos, price, date, "跌破黄线清仓")
-                to_remove.append(code)
-                continue
+                if price < pos.buy_price * 0.97:
+                    cur_idx = self._td_index.get(date)
+                    if cur_idx is not None:
+                        self._cooldown[code] = cur_idx
+                    self._sell_position(code, pos, price, date, "跌破黄线清仓")
+                    to_remove.append(code)
+                    continue
 
             # 2. T+N 没涨清仓（基于摊薄成本价判断）
             if days_held >= self._t_plus_n and price <= avg_cost:
