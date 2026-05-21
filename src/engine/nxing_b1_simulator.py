@@ -238,6 +238,8 @@ class NxingB1Simulator:
                 sl = low_val * 0.99
             else:
                 sl = yellow_val * 0.99
+            if sl > price:
+                sl = price * 0.95
 
             pos = Position(
                 code=code, buy_date=date, buy_price=price,

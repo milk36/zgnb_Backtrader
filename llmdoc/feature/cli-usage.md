@@ -21,6 +21,7 @@
 | `huangbai_b2` | B2 倍量柱 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2_v2` | B2 V2 倍量柱（30日B1频次） | 组合模拟（默认）/ 仅扫描 |
 | `nxing_b1` | N型B1选股 | 组合模拟（默认）/ 仅扫描 |
+| `jinchai_b1` | 金叉B1选股 | 仅扫描（纯选股+K线图） |
 
 ### 运行模式
 
@@ -79,11 +80,21 @@
 
 注意：`nxing_b1` 不支持 `--symbol` 单股回测，不需要 `--portfolio` 标志。
 
+#### 金叉B1选股（`jinchai_b1`）
+
+仅支持选股扫描模式（纯选股，不做买卖操作）：
+
+| 模式 | 触发参数 | 说明 |
+|------|----------|------|
+| 仅扫描选股 | 无需额外参数（默认） | 全市场扫描金叉+B1选股 + K线图 + T+5胜率统计 |
+
+注意：`jinchai_b1` 不支持 `--symbol` 单股回测、不支持 `--portfolio` 组合模拟。无需 `--scan-only` 标志（默认即扫描）。`--start / --end` 限定B1信号日期范围。
+
 ### 完整参数表
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `nxing_b1` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `nxing_b1` / `jinchai_b1` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -206,6 +217,16 @@ python main.py --strategy nxing_b1 --chart
 python main.py --strategy nxing_b1 --scan-only
 ```
 
+#### 金叉B1选股
+
+```bash
+# 全市场扫描（默认即扫描，无需 --scan-only）
+python main.py --strategy jinchai_b1 --scan-only
+
+# 指定日期区间
+python main.py --strategy jinchai_b1 --scan-only --start 2024-01-01 --end 2025-05-01
+```
+
 #### 前复权缓存管理
 
 ```bash
@@ -289,3 +310,4 @@ python main.py --strategy kdj --symbol 600036
 - `huangbai_b2_v2` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `nxing_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `jinzhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
+- `jinchai_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None，仅纯扫描+图表）

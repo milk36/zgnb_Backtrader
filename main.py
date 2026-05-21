@@ -78,6 +78,7 @@ from src.strategies.nxing_b1_scan_strategy import (
     scan_all_nx_b1,
     preload_all_signals as preload_nx_b1,
 )
+from src.strategies.jinchai_b1_scan_strategy import scan_all_jc_b1
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -92,6 +93,7 @@ STRATEGIES = {
     "huangbai_b2": None,     # B2倍量柱：仅支持组合级模拟+扫描
     "huangbai_b2_v2": None,  # B2_V2倍量柱：30日B1频次过滤，仅支持组合级模拟+扫描
     "nxing_b1": None,       # N型B1选股：组合级模拟+扫描，不支持单股回测
+    "jinchai_b1": None,     # 金叉B1选股：纯扫描+图表，不支持回测
 }
 
 
@@ -426,6 +428,17 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals)
+        return
+
+    # ---- 金叉B1选股策略 ----
+    if args.strategy == "jinchai_b1":
+        print("=" * 55)
+        print("  金叉B1 全市场选股扫描")
+        print("  条件: 白线金叉黄线后出现B1 + 市值>50亿 + 8项假案例排除")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print("=" * 55)
+        scan_all_jc_b1(stock_type=args.stock_type,
+                       start_date=args.start, end_date=args.end)
         return
 
     # ---- B2 倍量柱策略 ----
