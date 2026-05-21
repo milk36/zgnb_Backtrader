@@ -75,7 +75,7 @@ from src.strategies.jinzhuan_strategy import scan_all as scan_all_jzh
 from src.strategies.huangbai_b2_strategy import scan_all as scan_all_b2
 from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
 from src.strategies.nxing_b1_scan_strategy import (
-    scan_all as scan_all_nx_b1,
+    scan_all_nx_b1,
     preload_all_signals as preload_nx_b1,
 )
 

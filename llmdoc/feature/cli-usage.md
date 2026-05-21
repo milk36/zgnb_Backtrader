@@ -14,10 +14,13 @@
 | `huangbai` | 黄白线 B1（默认） | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `huangbai_v2` | 黄白线 B1 + 大盘MACD | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `huangbai_v3` | 黄白线 B1 V3 | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
+| `huangbai_v4` | 黄白线 B1 V4（无金叉+动能过滤） | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
+| `huangbai_v5` | 黄白线 B1 V5（战法退出） | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `dongneng_zhuan` | 动能+砖 | 组合模拟（默认）/ 仅扫描 |
 | `nxing_zhuan` | N型+砖 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2` | B2 倍量柱 | 组合模拟（默认）/ 仅扫描 |
-| `nxing_b1` | N型B1选股 | 全市场扫描（仅扫描） |
+| `huangbai_b2_v2` | B2 V2 倍量柱（30日B1频次） | 组合模拟（默认）/ 仅扫描 |
+| `nxing_b1` | N型B1选股 | 组合模拟（默认）/ 仅扫描 |
 
 ### 运行模式
 
@@ -67,19 +70,20 @@
 
 #### N型B1选股（`nxing_b1`）
 
-纯选股扫描策略，无组合模拟、无回测，运行即扫描全市场并生成K线图：
+默认直接进入组合级模拟（无需 `--portfolio`），支持 2 种运行模式：
 
 | 模式 | 触发参数 | 说明 |
 |------|----------|------|
-| 全市场扫描 | 无需额外参数（默认） | 60日N型B1结构筛选 + 流通市值>50亿 + vol_expand_ok过滤 + T+3胜率统计 + 自动生成K线图 |
+| 组合级模拟 | 无需额外参数（默认） | 60日N型B1结构筛选 + T+1开盘买入 + 六级退出（100万/10只/每只10万） |
+| 仅扫描选股 | `--scan-only` | 全市场扫描N型B1选股 + K线图 + T+3胜率统计 |
 
-注意：`nxing_b1` 不支持 `--symbol`、`--portfolio`、`--scan`、`--scan-only` 等参数，运行即执行全市场扫描。
+注意：`nxing_b1` 不支持 `--symbol` 单股回测，不需要 `--portfolio` 标志。
 
 ### 完整参数表
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `dongneng_zhuan` / `nxing_zhuan` / `huangbai_b2` / `nxing_b1` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `nxing_b1` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -89,7 +93,7 @@
 | `--scan-only` | flag | - | 仅扫描选股，不回测 |
 | `--portfolio` | flag | - | 组合级模拟模式（仅 `huangbai` 系列需要，`dongneng_zhuan` 默认即为组合模拟） |
 | `--no-plot` | flag | - | 禁用回测结果绘图（仅指定股票回测模式有图） |
-| `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。仅 V1/V2/V3 `--portfolio` 模式有效 |
+| `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。支持 V1/V2/V3 `--portfolio`、`dongneng_zhuan`、`nxing_zhuan`、`huangbai_b2`、`nxing_b1` 等组合模拟模式 |
 | `--update-qfq-cache` | flag | - | 批量更新前复权缓存（需要网络）。不指定 `--update-qfq-codes` 时自动扫描通达信目录获取全市场股票列表 |
 | `--update-qfq-codes` | str[] | 无 | 指定更新前复权缓存的股票代码，需配合 `--update-qfq-cache` 使用 |
 
@@ -189,8 +193,17 @@ python main.py --strategy huangbai_b2 --chart
 #### N型B1选股
 
 ```bash
-# 全市场扫描（默认模式，运行即扫描）
+# 组合级模拟（默认模式，无需 --portfolio）
 python main.py --strategy nxing_b1
+
+# 自定义回测区间
+python main.py --strategy nxing_b1 --start 2024-01-01 --end 2025-05-01
+
+# 组合级模拟 + K线图
+python main.py --strategy nxing_b1 --chart
+
+# 仅扫描选股 + K线图
+python main.py --strategy nxing_b1 --scan-only
 ```
 
 #### 前复权缓存管理
@@ -250,6 +263,14 @@ python main.py --strategy kdj --symbol 600036
 - **退出逻辑**：复用 PortfolioSimulator 标准六级退出（止损→T+N→盈利100%→半仓持股→涨停卖半→中阳卖1/3）
 - **大盘MACD过滤**：同V2，空头日只卖不买
 
+#### N型B1参数
+
+- **无需 `--portfolio`**：默认即组合级模拟
+- **不支持 `--symbol`**：仅支持全市场扫描或组合模拟
+- **`--stock-type`**：同黄白线系列，影响振幅阈值、中阳判断、涨停板计算
+- **资金/仓位**：`NXB1_INITIAL_CASH=100万`、`NXB1_MAX_POSITIONS=10`、`NXB1_PER_POSITION=10万`，来自 `config.py`
+- **退出逻辑**：复用 PortfolioSimulator 标准六级退出（止损→跌破黄线→T+N→盈利100%→半仓持股→动量持股）
+
 ## 3. Relevant Code Modules
 
 - `main.py` - CLI 入口，`parse_args()` 参数定义与模式分发逻辑
@@ -265,3 +286,6 @@ python main.py --strategy kdj --symbol 600036
 - `dongneng_zhuan` 不支持单股 Backtrader 回测（STRATEGIES 字典中值为 None）
 - `nxing_zhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `huangbai_b2` 同样不支持单股回测（STRATEGIES 字典中值为 None）
+- `huangbai_b2_v2` 同样不支持单股回测（STRATEGIES 字典中值为 None）
+- `nxing_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None）
+- `jinzhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
