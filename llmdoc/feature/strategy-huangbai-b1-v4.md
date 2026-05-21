@@ -25,6 +25,14 @@ V2 策略的变体版本，**移除黄白线金叉条件**，新增**60日动能
 3. **60日内有动能信号**（综合天命打分 + 阵营过滤 + 硬性过滤）
 4. B1 买入信号（7 个子条件 OR）
 5. vol_expand_ok 过滤链
+6. **突然放巨量阴线过滤**（独立于 vol_expand_ok）：60日内出现 V>REF(V,1)*3 & V>MA(V,20)*3 & C<O & (O-C)/O>3% 则剔除
+
+### 突然放巨量阴线检测
+
+独立于 vol_expand_ok 过滤链，在 `_compute_signals()` 和 `_compute_all_bar_signals()` 中实现：
+- **选股过滤**（`no_huge_vol_bearish`）：60日内出现巨量阴线则剔除
+- **持股退出**（`huge_vol_bearish`）：PortfolioSimulator 中发生巨量阴线则最高优先级清仓（仅次于止损）
+- **不在 `indicators()` 中**（单股回测路径不含此过滤）
 
 ### 动能信号过滤：`_compute_dongneng_ok()`
 
@@ -76,6 +84,7 @@ V2 策略的变体版本，**移除黄白线金叉条件**，新增**60日动能
 ## 4. Attention
 
 - B1 逻辑变更需同步三个位置：`HuangBaiB1V4Strategy.indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`（与 V1/V2 相同的三处同步问题）
+- **突然放巨量阴线**检测仅在 `_compute_signals()` 和 `_compute_all_bar_signals()` 中实现，不在 `indicators()` 中（单股回测路径不含此过滤）
 - 动能信号逻辑变更需同步三处中的 `_compute_dongneng_ok()` 调用。`_compute_dongneng_ok()` 本身是独立函数，三处共用
 - V4 代码独立于 V2 文件，不共享函数引用。V2 的 B1 逻辑变更不会自动同步到 V4，需手动维护
 - S1 加速检测使用 **回溯窗口** 模式（`HUANGBAI_S1_ACCEL_PCT=13`，`HUANGBAI_S1_ACCEL_LOOKBACK=10`）：`_accel_raw = (C-REF(C,5))/REF(C,5)*100 > 13`，然后 `_accel = EXIST(_accel_raw, 10)`，即近10天内任一天有5日涨幅超过13%即视为加速。原逻辑要求当天同时满足加速+大阴线，改为回溯窗口后解决了加速窗口和出货窗口错开时漏检的问题

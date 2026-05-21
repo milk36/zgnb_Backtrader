@@ -58,6 +58,14 @@
 
 最终信号：`final_ok = dongneng_ok & jinzhuan_ok & chip_dense`
 
+### 突然放巨量阴线检测
+
+独立过滤，在 `_compute_all_bar_signals()` 末尾实现：
+- **定义**：`V > REF(V,1)*3` 且 `V > MA(V,20)*3` 且 `C < O` 且 `(O-C)/O > 0.03`
+- **选股过滤**（`no_huge_vol_bearish`）：60日内出现则剔除，`scan_all()` 中 `final_ok & no_huge_vol_bearish` 才入选
+- **持股退出**（`huge_vol_bearish`）：DongnengZhuanSimulator 中发生巨量阴线则最高优先级清仓（仅次于止损）
+- 信号字典新增 `huge_vol_bearish` 和 `no_huge_vol_bearish` 字段
+
 ### 流通市值过滤
 
 - `_load_capital_data(tdxdir)`: 解析通达信 `T0002/hq_cache/base.dbf` 获取 LTAG（流通股本，万股）
@@ -89,4 +97,5 @@
 - OVERHEAD_V20（套牢筹码流量）使用 REF(SUM(...),1) 即前一日的累计值
 - 流通市值过滤已启用：通过 `_load_capital_data()` 解析 base.dbf 获取 LTAG，配合 `DNZH_MIN_MARKET_CAP=50.0`（亿元）过滤
 - 筹码密集过滤已启用：使用60日滚动VWAP近似 COST()，`chip_dense` 作为 `final_ok` 的必要条件
+- **突然放巨量阴线**检测已启用：60日内出现巨量阴线则剔除，持股时发生则最高优先级清仓（仅次于止损）
 - `_load_capital_data()` 在 base.dbf 不存在时返回 None，此时 `liutong_mask` 为全 True（不过滤）

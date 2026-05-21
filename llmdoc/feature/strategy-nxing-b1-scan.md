@@ -17,8 +17,9 @@ N型B1策略包含两个运行模式：
 1. **流通市值 > 50亿**（复用 `dongneng_zhuan_strategy._load_capital_data()`）
 2. **B1七子条件**：复用 V4 的完整 B1 买入子条件（7 个 OR），通过 `_compute_all_bar_b1_and_filters()` 一次性计算全bar信号
 3. **vol_expand_ok 过滤链**：放量上涨支撑 + 缩量上涨排除 + 放量下跌排除 + 阶梯出货排除 + 长上影线排除 + S1/大风车排除（与 V4 完全一致）
-4. **N型结构**（`_find_nx_b1_pattern()`）：60日内 >= 2 次 B1信号，相邻两次间隔 >= 30 天，每次 B1 价格逐次抬高
-5. **最新bar vol_expand_ok**：仅在最新交易日满足过滤时才入选
+4. **突然放巨量阴线过滤**：60日内出现 V>REF(V,1)*3 & V>MA(V,20)*3 & C<O & (O-C)/O>3% 则剔除（`no_huge_vol_bearish`，独立于 vol_expand_ok）
+5. **N型结构**（`_find_nx_b1_pattern()`）：60日内 >= 2 次 B1信号，相邻两次间隔 >= 30 天，每次 B1 价格逐次抬高
+6. **最新bar vol_expand_ok**：仅在最新交易日满足过滤时才入选
 
 ### N型结构检测算法
 
@@ -92,6 +93,7 @@ python main.py --strategy nxing_b1 --scan-only
 
 - 无 Backtrader 策略类、无单股回测，STRATEGIES 注册值为 None
 - B1逻辑和 vol_expand_ok 过滤链从 V4 策略独立复制（非导入），修改 V4 的 B1 逻辑不会自动同步到此策略，需手动维护
+- **突然放巨量阴线**检测在 `_compute_all_bar_b1_and_filters()` 中独立实现，N型B1组合模拟中亦作为持股退出条件（NxingB1Simulator 中仅次于止损的最高优先级清仓）
 - 流通市值数据通过 `_load_capital_data()` 从通达信本地目录加载，数据缺失时该股票被跳过
 - 选股扫描模式：`charts/` 目录每次扫描会被清空重建
 - 扫描结果按缩量得分（shrink_score）升序排列

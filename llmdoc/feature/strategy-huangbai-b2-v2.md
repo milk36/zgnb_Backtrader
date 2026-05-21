@@ -18,6 +18,7 @@ B2_V2是对V4 `_compute_all_bar_signals()` 的薄包装层，新增30日B1频次
 4. **前日B1信号**（`np.roll(b1_original, 1)`）
 5. **当日倍量柱信号**（`_compute_beiliangzhu()`）
 6. vol_expand_ok 过滤链（复用V4）
+7. **突然放巨量阴线过滤**（复用V4）：60日内出现 V>REF(V,1)*3 & V>MA(V,20)*3 & C<O & (O-C)/O>3% 则剔除
 
 ### 30日B1频次过滤：`_compute_b1_count_filter(b1_array, lookback, min_count, min_gap)`
 
@@ -87,6 +88,7 @@ PLRY_FIRST := PLRY AND NOT(REF(PLRY,1))
 ## 4. Attention
 
 - B2_V2与B2的差异仅在：新增30日B1频次过滤、不设b2_sort_primary（改用默认shrink_score排序）、扫描只取前1支
+- **突然放巨量阴线**过滤通过V4信号字典的 `no_huge_vol_bearish` 字段传递，B2_V2 无独立实现
 - 30日B1频次过滤使用循环实现（每bar检查30天窗口），对性能影响约5%
 - `_scan_one_all_bars` 中 `b1_count_ok` 不随T+1前移（它描述的是当日的B1频次状态）
 - `preload_all_signals()` 返回三元组（含 `market_macd_bullish`），与V2/V3/V4/V5/B2一致

@@ -40,6 +40,17 @@
 
 此过滤在 `indicators()`、`_compute_signals()`、`_compute_all_bar_signals()` 三处均已实现，变更时需同步更新。
 
+### 突然放巨量阴线检测（独立于 vol_expand_ok）
+
+在 B1 信号和 vol_expand_ok 均通过后，还需通过巨量阴线过滤：
+
+- **定义**：`V > REF(V,1)*3` 且 `V > MA(V,20)*3` 且 `C < O`（收阴）且 `(O-C)/O > 0.03`（实体>3%）
+- **选股过滤**（`_compute_signals` / `_compute_all_bar_signals`）：60个交易日内出现则剔除（`no_huge_vol_bearish`）
+- **持股退出**（PortfolioSimulator）：持仓期间发生巨量阴线则最高优先级清仓（仅次于止损），原因标记"巨量阴线清仓"
+- **信号字段**：`huge_vol_bearish`（每bar布尔数组，供模拟器退出使用）、`no_huge_vol_bearish`（60日内无巨量阴线）
+
+此检测独立于 vol_expand_ok 过滤链，在 `_compute_signals()` 和 `_compute_all_bar_signals()` 中实现，**不在 `indicators()` 中**（单股回测路径不含此过滤）。
+
 ### B1 七个子条件
 
 | # | 名称 | 核心逻辑 |
@@ -114,7 +125,7 @@
 1. Phase 1: `preload_all_signals()` 并行预计算全部 A 股信号（~55秒，16 workers）
 2. Phase 2: `PortfolioSimulator.run()` 逐日模拟（周一更新观察池 → 每日检查金叉+B1+vol_expand_ok → 按(shrink_score升序, avg_amount_20降序, chip_spread升序)三键排序买入最优 → 检查卖出条件）
 
-卖出优先级：止损 → T+N没涨 → 盈利100%清仓 → 半仓持股模式 → 涨停卖1/2（中阳未触发时）→ 中阳卖1/3（需当日上涨）
+卖出优先级：止损 → 巨量阴线清仓 → T+N没涨 → 盈利100%清仓 → 半仓持股模式 → 涨停卖1/2（中阳未触发时）→ 中阳卖1/3（需当日上涨）
 
 CLI 入口：
 
@@ -145,6 +156,7 @@ CLI 入口：
 - `log()` 方法自动从 `self.data._name` 获取股票代码，所有日志行均包含代码标识
 - `_compute_signals()` 是策略 B1 逻辑的纯 MyTT 复刻版本，策略指标变更时需同步更新此函数
 - `_compute_all_bar_signals()` 是 `indicators()` 的向量版本，B1 逻辑变更需同步三个位置：`indicators()`、`_compute_signals()`、`_compute_all_bar_signals()`
+- **突然放巨量阴线**检测仅在 `_compute_signals()` 和 `_compute_all_bar_signals()` 中实现，不在 `indicators()` 中（单股回测路径不含此过滤）
 - 扫描约 5202 只股票耗时约 40 秒（16 workers），预加载全量信号约 55 秒
 - `PortfolioSimulator` 中 T+N 按交易日计算（通过 trading_days 索引差值），非自然日
 - 止损逻辑：白线上方→最低价止损，白线黄线之间→黄线止损，黄线之下→最低价止损
