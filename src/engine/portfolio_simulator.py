@@ -418,6 +418,9 @@ class PortfolioSimulator:
             avg_cost = remaining_cost / pos.size if pos.size > 0 else pos.buy_price
 
             pct_gain = (price - pos.buy_price) / pos.buy_price * 100
+            if price > pos.max_price_since_buy:
+                pos.max_price_since_buy = price
+            max_gain = (pos.max_price_since_buy - pos.buy_price) / pos.buy_price * 100
             real_gain = (price - avg_cost) / avg_cost * 100
 
             # 1. 止损
@@ -450,6 +453,15 @@ class PortfolioSimulator:
                         if pos.size <= pos.initial_size // 2:
                             pos.hold_until_below_white = True
                     continue
+
+            # V4: 曾经浮盈>=20% + 跌破黄线 → 清仓
+            if "B1V4" in self._strategy_tag and price < yellow_val and max_gain >= 20:
+                cur_idx = self._td_index.get(date)
+                if cur_idx is not None:
+                    self._cooldown[code] = cur_idx
+                self._sell_position(code, pos, price, date, "盈利跌破黄线清仓")
+                to_remove.append(code)
+                continue
 
             # 1.5 跌破黄线清仓（黄线以下建仓且未部分止盈时跳过；亏损不足3%时跳过）
             if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy and not pos.partial_sold):
