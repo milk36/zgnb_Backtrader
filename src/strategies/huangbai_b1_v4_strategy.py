@@ -444,16 +444,17 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-        # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+        # 前一波高点（C >= 黄线时跟踪波峰，阴线取实体上沿）
         _wave_high = np.empty(len(C))
-        _peak = H[0]
+        _peak = max(H[0], C[0]) if C[0] >= O[0] else max(C[0], O[0])
         _prev_in = C[0] >= self._yellow[0]
         for _i in range(len(C)):
             _in = C[_i] >= self._yellow[_i]
+            _h = H[_i] if C[_i] >= O[_i] else max(C[_i], O[_i])
             if _in and not _prev_in:
-                _peak = H[_i]
+                _peak = _h
             elif _in:
-                _peak = max(_peak, H[_i])
+                _peak = max(_peak, _h)
             _wave_high[_i] = _peak
             _prev_in = _in
 
@@ -1033,16 +1034,17 @@ def _compute_signals(C, H, L, O, V, dates, params):
                    and near_amp[i] >= 11.9 and far_amp[i] >= 19.5):
         b1 = True
 
-    # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+    # 前一波高点（C >= 黄线时跟踪波峰，阴线取实体上沿）
     _wave_high = np.empty(n)
-    _peak = H[0]
+    _peak = max(H[0], C[0]) if C[0] >= O[0] else max(C[0], O[0])
     _prev_in = C[0] >= yellow[0]
     for _i in range(n):
         _in = C[_i] >= yellow[_i]
+        _h = H[_i] if C[_i] >= O[_i] else max(C[_i], O[_i])
         if _in and not _prev_in:
-            _peak = H[_i]
+            _peak = _h
         elif _in:
-            _peak = max(_peak, H[_i])
+            _peak = max(_peak, _h)
         _wave_high[_i] = _peak
         _prev_in = _in
 
@@ -1370,16 +1372,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-    # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+    # 前一波高点（C >= 黄线时跟踪波峰，阴线取实体上沿）
     _wave_high = np.empty(len(C))
-    _peak = H[0]
+    _peak = max(H[0], C[0]) if C[0] >= O[0] else max(C[0], O[0])
     _prev_in = C[0] >= yellow[0]
     for _i in range(len(C)):
         _in = C[_i] >= yellow[_i]
+        _h = H[_i] if C[_i] >= O[_i] else max(C[_i], O[_i])
         if _in and not _prev_in:
-            _peak = H[_i]
+            _peak = _h
         elif _in:
-            _peak = max(_peak, H[_i])
+            _peak = max(_peak, _h)
         _wave_high[_i] = _peak
         _prev_in = _in
 
