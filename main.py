@@ -486,7 +486,8 @@ def main():
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
             market_macd_bullish=market_macd_bullish,
-            strategy_tag="[B2]")
+            strategy_tag="[B2]",
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file,
@@ -540,7 +541,8 @@ def main():
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
             market_macd_bullish=None,
-            strategy_tag="[B2_V2]")
+            strategy_tag="[B2_V2]",
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file,
@@ -583,7 +585,8 @@ def main():
             per_position_cash=PORTFOLIO_PER_POSITION,
             commission=COMMISSION,
             stock_type=args.stock_type,
-            log_dir=LOG_DIR)
+            log_dir=LOG_DIR,
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1]")
@@ -629,7 +632,8 @@ def main():
             commission=COMMISSION,
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
-            market_macd_bullish=market_macd_bullish)
+            market_macd_bullish=market_macd_bullish,
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V2]")
@@ -674,7 +678,8 @@ def main():
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
             market_macd_bullish=market_macd_bullish,
-            strategy_tag="[B1V3]")
+            strategy_tag="[B1V3]",
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V3]")
@@ -720,7 +725,8 @@ def main():
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
             market_macd_bullish=market_macd_bullish,
-            strategy_tag="[B1V4]")
+            strategy_tag="[B1V4]",
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V4]")
@@ -767,7 +773,8 @@ def main():
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
             market_macd_bullish=market_macd_bullish,
-            strategy_tag="[B1V5]")
+            strategy_tag="[B1V5]",
+            cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file, strategy_tag="[B1V5]")

@@ -70,9 +70,11 @@ class PortfolioSimulator:
                  initial_cash=1_000_000, max_positions=10,
                  per_position_cash=100_000, commission=0.0003,
                  stock_type="main", t_plus_n=3, log_dir="logs",
-                 market_macd_bullish=None, strategy_tag=None):
+                 market_macd_bullish=None, strategy_tag=None,
+                 cli_args=None):
         self._all_signals = all_signals
         self._trading_days = trading_days
+        self._cli_args = cli_args
         self._initial_cash = initial_cash
         self._max_positions = max_positions
         self._per_position_cash = per_position_cash
@@ -165,6 +167,10 @@ class PortfolioSimulator:
 
         # 诊断：打印交易日历范围
         if len(self._trading_days) > 0:
+            # 输出执行参数
+            if self._cli_args is not None:
+                import sys
+                self._log(f"  {self._strategy_tag} 执行命令: {' '.join(sys.argv)}")
             first = self._trading_days[0]
             last = self._trading_days[-1]
             years = pd.Series(self._trading_days.year).value_counts().sort_index()
