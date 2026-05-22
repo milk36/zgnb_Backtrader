@@ -54,7 +54,6 @@ from src.strategies.nxing_b1_scan_strategy import (
     _get_all_codes,
 )
 
-from MyTT import HHV
 
 # ---------- 金叉B1参数 ----------
 JCB1_GC_MAX_BARS = 30       # 金叉距今最大bar数（"刚刚金叉"）
@@ -69,19 +68,35 @@ JCB1_MAX_CROSS_CYCLES = 1   # 最大允许交叉周期数（超过则排除）
 #  盈亏比 + 反复交叉过滤                                                 #
 # ================================================================== #
 
+def _find_prev_wave_high(H, C, yellow, ref_idx, lookback=60):
+    """找到B1之前最近一波上涨（价格>=黄线）的最高点"""
+    start = max(0, ref_idx - lookback)
+    # Step 1: 往回跳过回踩区间（价格 < 黄线）
+    i = ref_idx
+    while i > start and C[i] < yellow[i]:
+        i -= 1
+    # Step 2: i 处价格 >= 黄线，继续往回找到这波上涨的起点
+    wave_end = i
+    wave_start = i
+    while i >= start and C[i] >= yellow[i]:
+        wave_start = i
+        i -= 1
+    # Step 3: 这波上涨的最高价
+    return float(np.max(H[wave_start:wave_end + 1]))
+
+
 def _check_risk_reward(C, H, yellow, ref_idx, min_ratio=JCB1_MIN_RISK_REWARD):
     """检查盈亏比：reward/risk >= min_ratio
 
-    risk = 当前价 - 止损价（黄线*0.99）
-    reward = 60日最高价 - 当前价
+    risk = 买入价 - 止损价（黄线*0.99）
+    reward = 前一波高点 - 买入价
     """
     price = float(C[ref_idx])
     stop_loss = float(yellow[ref_idx]) * 0.99
     risk = price - stop_loss
     if risk <= 0:
         return False
-    hhv60 = HHV(H, 60)
-    target = float(hhv60[ref_idx])
+    target = _find_prev_wave_high(H, C, yellow, ref_idx)
     reward = target - price
     if reward <= 0:
         return False

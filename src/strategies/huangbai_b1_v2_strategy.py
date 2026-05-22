@@ -1253,9 +1253,22 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+    # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+    _wave_high = np.empty(len(C))
+    _peak = H[0]
+    _prev_in = C[0] >= yellow[0]
+    for _i in range(len(C)):
+        _in = C[_i] >= yellow[_i]
+        if _in and not _prev_in:
+            _peak = H[_i]
+        elif _in:
+            _peak = max(_peak, H[_i])
+        _wave_high[_i] = _peak
+        _prev_in = _in
+
     # 盈亏比过滤：奖励 >= 3倍风险 或 无风险（已在黄线上方）
     _rr_risk = C - yellow * 0.99
-    _rr_reward = HHV(H, 60) - C
+    _rr_reward = _wave_high - C
     _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
     b1 = b1 & _rr_ok
 

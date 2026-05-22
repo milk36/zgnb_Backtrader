@@ -444,6 +444,25 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+        # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+        _wave_high = np.empty(len(C))
+        _peak = H[0]
+        _prev_in = C[0] >= self._yellow[0]
+        for _i in range(len(C)):
+            _in = C[_i] >= self._yellow[_i]
+            if _in and not _prev_in:
+                _peak = H[_i]
+            elif _in:
+                _peak = max(_peak, H[_i])
+            _wave_high[_i] = _peak
+            _prev_in = _in
+
+        # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
+        _rr_risk = C - self._yellow * 0.99
+        _rr_reward = _wave_high - C
+        _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
+        self._b1 = self._b1 & _rr_ok
+
         # 动能信号过滤：60日内有动能信号
         dongneng_ok = _compute_dongneng_ok(C, H, L, O, V)
         self._dongneng_recent = EXIST(dongneng_ok, 60)
@@ -1015,6 +1034,26 @@ def _compute_signals(C, H, L, O, V, dates, params):
                    and near_amp[i] >= 11.9 and far_amp[i] >= 19.5):
         b1 = True
 
+    # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+    _wave_high = np.empty(n)
+    _peak = H[0]
+    _prev_in = C[0] >= yellow[0]
+    for _i in range(n):
+        _in = C[_i] >= yellow[_i]
+        if _in and not _prev_in:
+            _peak = H[_i]
+        elif _in:
+            _peak = max(_peak, H[_i])
+        _wave_high[_i] = _peak
+        _prev_in = _in
+
+    # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
+    if b1:
+        _rr_risk = C[i] - yellow[i] * 0.99
+        _rr_reward = _wave_high[i] - C[i]
+        if _rr_risk > 0 and _rr_reward < _rr_risk * 3:
+            b1 = False
+
     return {"weekly": True, "gc": True, "market_macd": True, "b1": b1,
             "dongneng_recent": dongneng_recent, "vol_expand": vol_expand_ok,
             "no_huge_vol_bearish": no_huge_vol_bearish,
@@ -1336,9 +1375,22 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
+    # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
+    _wave_high = np.empty(len(C))
+    _peak = H[0]
+    _prev_in = C[0] >= yellow[0]
+    for _i in range(len(C)):
+        _in = C[_i] >= yellow[_i]
+        if _in and not _prev_in:
+            _peak = H[_i]
+        elif _in:
+            _peak = max(_peak, H[_i])
+        _wave_high[_i] = _peak
+        _prev_in = _in
+
     # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
     _rr_risk = C - yellow * 0.99
-    _rr_reward = HHV(H, 60) - C
+    _rr_reward = _wave_high - C
     _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
     b1 = b1 & _rr_ok
 

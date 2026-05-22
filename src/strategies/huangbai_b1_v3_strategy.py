@@ -154,10 +154,23 @@ def _compute_v3_b1(C, H, L, O, V, skip_mvok=True):
     # B1 最终条件
     b1 = (HMSHORTWL >= HMLONGYL * 0.985) & (C >= HMLONGYL * 0.985) & A1
 
-    # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
+    # 前一波高点（C >= 黄线时跟踪波峰，波浪切换时重置）
     yellow = (MA(C, 14) + MA(C, 28) + MA(C, 57) + MA(C, 114)) / 4
+    _wave_high = np.empty(len(C))
+    _peak = H[0]
+    _prev_in = C[0] >= yellow[0]
+    for _i in range(len(C)):
+        _in = C[_i] >= yellow[_i]
+        if _in and not _prev_in:
+            _peak = H[_i]
+        elif _in:
+            _peak = max(_peak, H[_i])
+        _wave_high[_i] = _peak
+        _prev_in = _in
+
+    # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
     _rr_risk = C - yellow * 0.99
-    _rr_reward = HHV(H, 60) - C
+    _rr_reward = _wave_high - C
     _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
     b1 = b1 & _rr_ok
 
