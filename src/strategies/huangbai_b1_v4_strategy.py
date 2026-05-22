@@ -533,9 +533,9 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         if not market_macd_ok and self._market_macd_bullish is not None:
             market_macd_ok = self._market_macd_bullish[idx]
 
-        weekly_ok = self.p.skip_weekly or (self._weekly_bull[idx] and self._above_ma30w[idx])
+        weekly_ok = True  # V4: 屏蔽周线多头
         b1_ok = self._b1[idx]
-        dongneng_recent = self._dongneng_recent[idx]
+        dongneng_recent = True  # V4: 屏蔽动能过滤
         vol_expand_ok = self.p.skip_vol_expand or self._vol_expand_ok[idx]
 
         if self.p.print_log:
@@ -858,12 +858,11 @@ def _compute_signals(C, H, L, O, V, dates, params):
     ma120w = _weekly_ma(C, dates, params["wma120"])
     ma240w = _weekly_ma(C, dates, params["wma240"])
     valid = all(v > 0.01 for v in [ma30w[i], ma60w[i], ma120w[i], ma240w[i]])
-    weekly_ok = valid and ma30w[i] > ma60w[i] > ma120w[i] > ma240w[i]
-    above_ma30w = C[i] > ma30w[i]
+    weekly_ok = True  # V4: 屏蔽周线多头
+    above_ma30w = True
 
-    # 动能信号过滤：60日内有动能信号
-    dongneng_ok = _compute_dongneng_ok(C, H, L, O, V)
-    dongneng_recent = EXIST(dongneng_ok, 60)[i]
+    # 动能信号过滤：V4屏蔽
+    dongneng_recent = True
 
     # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)
@@ -912,8 +911,8 @@ def _compute_signals(C, H, L, O, V, dates, params):
     no_huge_vol_bearish = not EXIST(_hvb_arr, 60)[i]
 
     if not (weekly_ok and above_ma30w and dongneng_recent and vol_expand_ok):
-        return {"weekly": weekly_ok and above_ma30w, "gc": True,
-                "market_macd": True, "b1": False, "dongneng_recent": dongneng_recent,
+        return {"weekly": True, "gc": True,
+                "market_macd": True, "b1": False, "dongneng_recent": True,
                 "vol_expand": vol_expand_ok,
                 "no_huge_vol_bearish": no_huge_vol_bearish,
                 "close": C[i], "J": J[i], "RSI": rsi[i],
@@ -1218,13 +1217,9 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     l_denom = HHV(C, params["n2"]) - LLV(L, params["n2"])
     LONG = np.where(l_denom != 0, 100 * (C - LLV(L, params["n2"])) / l_denom, 50.0)
 
-    ma30w = _weekly_ma(C, dates, params["wma30"])
-    ma60w = _weekly_ma(C, dates, params["wma60"])
-    ma120w = _weekly_ma(C, dates, params["wma120"])
-    ma240w = _weekly_ma(C, dates, params["wma240"])
-    valid = (ma30w > 0.01) & (ma60w > 0.01) & (ma120w > 0.01) & (ma240w > 0.01)
-    weekly_bull = valid & (ma30w > ma60w) & (ma60w > ma120w) & (ma120w > ma240w)
-    above_ma30w = C > ma30w
+    # V4: 屏蔽周线多头
+    weekly_bull = np.ones(n, dtype=bool)
+    above_ma30w = np.ones(n, dtype=bool)
 
     # 流通市值过滤：流通市值 > DNZH_MIN_MARKET_CAP 亿元
     min_mc = params.get("min_market_cap", 0)
@@ -1394,9 +1389,8 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _rr_ok = (_rr_reward >= _rr_risk * 3) | (_rr_risk <= 0)
     b1 = b1 & _rr_ok
 
-    # 动能信号过滤：60日内有动能信号
-    dongneng_ok_arr = _compute_dongneng_ok(C, H, L, O, V)
-    dongneng_recent = EXIST(dongneng_ok_arr, 60)
+    # V4: 屏蔽动能过滤
+    dongneng_recent = np.ones(n, dtype=bool)
 
     # 前期放量上涨过滤 + 排除缩量快速拉升 + 连续涨停缩量排除 + 放量下跌排除
     vol_expand = (V > REF(V, 1) * 1.8) & (C > O) & (C > LC)

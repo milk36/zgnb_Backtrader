@@ -24,6 +24,7 @@ class Position:
         "partial_sold",
         "momentum_hold", "consecutive_tp_days", "consecutive_down_days",
         "profit_100pct", "profit_100pct_down_days",
+        "macd_tp_done",
         # V5 战法退出字段
         "key_k_high", "key_k_low", "key_k_bar",
         "white_break_pending", "white_break_bar",
@@ -61,6 +62,7 @@ class Position:
         self.max_price_since_buy = 0.0
         self.surge_reduction_done = False
         self.sl_based_on_yellow = False
+        self.macd_tp_done = False
 
 
 class PortfolioSimulator:
@@ -433,6 +435,21 @@ class PortfolioSimulator:
                 self._sell_position(code, pos, price, date, "巨量阴线清仓")
                 to_remove.append(code)
                 continue
+
+            # V4: 大盘MACD转空头 + 浮盈>=20% → 卖1/2止盈
+            if "B1V4" in self._strategy_tag and not pos.macd_tp_done:
+                _td_idx = self._td_index.get(date)
+                if (_td_idx is not None
+                        and self._market_macd_bullish is not None
+                        and not self._market_macd_bullish[_td_idx]
+                        and pct_gain >= 20):
+                    sell_size = max(1, pos.size // 2)
+                    if sell_size < pos.size:
+                        self._sell_partial(code, pos, sell_size, price, date, "大盘转空卖1/2")
+                        pos.macd_tp_done = True
+                        if pos.size <= pos.initial_size // 2:
+                            pos.hold_until_below_white = True
+                    continue
 
             # 1.5 跌破黄线清仓（黄线以下建仓且未部分止盈时跳过；亏损不足3%时跳过）
             if price < yellow_val and not (pos.buy_price < pos.yellow_at_buy and not pos.partial_sold):
