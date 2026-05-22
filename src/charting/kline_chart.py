@@ -148,19 +148,19 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     b1_s = b1_full[s] if b1_full is not None else None
     _draw_b1_markers(ax_price, x, b1_s, L_s)
 
-    # 计算盈亏比高点（前一波阳线高点）
+    # 计算盈亏比高点（前一波阳线高点，阴线跳过）
     wave_high_s = None
     if yellow is not None and yellow_s is not None:
         _wh = np.empty(n)
-        _pk = max(H_s[0], C_s[0]) if C_s[0] >= O_s[0] else max(C_s[0], O_s[0])
+        _pk = H_s[0] if C_s[0] >= O_s[0] else 0.0
         _pin = C_s[0] >= yellow_s[0] if not np.isnan(yellow_s[0]) else False
         for _i in range(n):
             _ni = C_s[_i] >= yellow_s[_i] if not np.isnan(yellow_s[_i]) else False
-            _h = H_s[_i] if C_s[_i] >= O_s[_i] else max(C_s[_i], O_s[_i])
+            _is_yang = C_s[_i] >= O_s[_i]
             if _ni and not _pin:
-                _pk = _h
-            elif _ni:
-                _pk = max(_pk, _h)
+                _pk = H_s[_i] if _is_yang else 0.0
+            elif _ni and _is_yang:
+                _pk = max(_pk, H_s[_i])
             _wh[_i] = _pk
             _pin = _ni
         wave_high_s = _wh

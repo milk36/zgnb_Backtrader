@@ -444,17 +444,17 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         self._b1 = (b_oversold_turn | b_oversold_shrink | b_raw
                     | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-        # 前一波高点（C >= 黄线时跟踪波峰，阴线取实体上沿）
+        # 前一波高点（C >= 黄线时跟踪阳线波峰，阴线跳过）
         _wave_high = np.empty(len(C))
-        _peak = max(H[0], C[0]) if C[0] >= O[0] else max(C[0], O[0])
+        _peak = H[0] if C[0] >= O[0] else 0.0
         _prev_in = C[0] >= self._yellow[0]
         for _i in range(len(C)):
             _in = C[_i] >= self._yellow[_i]
-            _h = H[_i] if C[_i] >= O[_i] else max(C[_i], O[_i])
+            _is_yang = C[_i] >= O[_i]
             if _in and not _prev_in:
-                _peak = _h
-            elif _in:
-                _peak = max(_peak, _h)
+                _peak = H[_i] if _is_yang else 0.0
+            elif _in and _is_yang:
+                _peak = max(_peak, H[_i])
             _wave_high[_i] = _peak
             _prev_in = _in
 
@@ -495,6 +495,7 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
         _at_high = C >= HHV(C, HUANGBAI_S1_HIGH_PERIOD) * HUANGBAI_S1_HIGH_RATIO
         _s1 = _accel & _big_vol & _big_yin & _at_high
+        _s1_huge_vol = _big_vol & _big_yin & _at_high
         _upper_shadow = H - np.maximum(O, C)
         _lower_shadow = np.minimum(O, C) - L
         _body = ABS(C - O)
@@ -506,7 +507,7 @@ class HuangBaiB1V4Strategy(BaseStrategy):
         _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
         _from_high = (C - HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)) / HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK) * 100
         _stepped_selloff = _accel & (_from_high < HUANGBAI_STEPPED_DROP_PCT)
-        no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)
+        no_s1_dafengche = ~EXIST(_s1 | _s1_huge_vol | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)
         self._vol_expand_ok = (has_vol_expand & no_shrinkage_surge
                                & no_consec_limit_shrink & no_heavy_decline
                                & no_s1_dafengche)
@@ -891,6 +892,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
     _at_high = C >= HHV(C, HUANGBAI_S1_HIGH_PERIOD) * HUANGBAI_S1_HIGH_RATIO
     _s1 = _accel & _big_vol & _big_yin & _at_high
+    _s1_huge_vol = _big_vol & _big_yin & _at_high
     _upper_shadow = H - np.maximum(O, C)
     _lower_shadow = np.minimum(O, C) - L
     _body = ABS(C - O)
@@ -902,7 +904,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
     _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
     _from_high = (C[i] - HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)[i]) / HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)[i] * 100
     _stepped_selloff = _accel and (_from_high < HUANGBAI_STEPPED_DROP_PCT)
-    no_s1_dafengche = not EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)[i]
+    no_s1_dafengche = not EXIST(_s1 | _s1_huge_vol | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)[i]
     vol_expand_ok = (has_vol_expand and no_shrinkage_surge
                      and no_consec_limit_shrink and no_heavy_decline
                      and no_s1_dafengche)
@@ -1034,17 +1036,17 @@ def _compute_signals(C, H, L, O, V, dates, params):
                    and near_amp[i] >= 11.9 and far_amp[i] >= 19.5):
         b1 = True
 
-    # 前一波高点（C >= 黄线时跟踪波峰，阴线取实体上沿）
+    # 前一波高点（C >= 黄线时跟踪阳线波峰，阴线跳过）
     _wave_high = np.empty(n)
-    _peak = max(H[0], C[0]) if C[0] >= O[0] else max(C[0], O[0])
+    _peak = H[0] if C[0] >= O[0] else 0.0
     _prev_in = C[0] >= yellow[0]
     for _i in range(n):
         _in = C[_i] >= yellow[_i]
-        _h = H[_i] if C[_i] >= O[_i] else max(C[_i], O[_i])
+        _is_yang = C[_i] >= O[_i]
         if _in and not _prev_in:
-            _peak = _h
-        elif _in:
-            _peak = max(_peak, _h)
+            _peak = H[_i] if _is_yang else 0.0
+        elif _in and _is_yang:
+            _peak = max(_peak, H[_i])
         _wave_high[_i] = _peak
         _prev_in = _in
 
@@ -1372,17 +1374,17 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-    # 前一波高点（C >= 黄线时跟踪波峰，阴线取实体上沿）
+    # 前一波高点（C >= 黄线时跟踪阳线波峰，阴线跳过）
     _wave_high = np.empty(len(C))
-    _peak = max(H[0], C[0]) if C[0] >= O[0] else max(C[0], O[0])
+    _peak = H[0] if C[0] >= O[0] else 0.0
     _prev_in = C[0] >= yellow[0]
     for _i in range(len(C)):
         _in = C[_i] >= yellow[_i]
-        _h = H[_i] if C[_i] >= O[_i] else max(C[_i], O[_i])
+        _is_yang = C[_i] >= O[_i]
         if _in and not _prev_in:
-            _peak = _h
-        elif _in:
-            _peak = max(_peak, _h)
+            _peak = H[_i] if _is_yang else 0.0
+        elif _in and _is_yang:
+            _peak = max(_peak, H[_i])
         _wave_high[_i] = _peak
         _prev_in = _in
 
@@ -1422,6 +1424,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _big_yin = (C < O) & ((O - C) / np.maximum(REF(C, 1), 0.001) * 100 > 3)
     _at_high = C >= HHV(C, HUANGBAI_S1_HIGH_PERIOD) * HUANGBAI_S1_HIGH_RATIO
     _s1 = _accel & _big_vol & _big_yin & _at_high
+    _s1_huge_vol = _big_vol & _big_yin & _at_high
     _upper_shadow = H - np.maximum(O, C)
     _lower_shadow = np.minimum(O, C) - L
     _body = ABS(C - O)
@@ -1433,7 +1436,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     _long_upper_shadow = _near_high & (_upper_pct > 3) & (_upper_shadow > _body * 2) & (V > REF(V, 1) * 1.3)
     _from_high = (C - HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK)) / HHV(H, HUANGBAI_STEPPED_DROP_LOOKBACK) * 100
     _stepped_selloff = _accel & (_from_high < HUANGBAI_STEPPED_DROP_PCT)
-    no_s1_dafengche = ~EXIST(_s1 | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)
+    no_s1_dafengche = ~EXIST(_s1 | _s1_huge_vol | _dafengche | _long_upper_shadow | _stepped_selloff, _s1p)
     vol_expand_ok = (has_vol_expand & no_shrinkage_surge
                      & no_consec_limit_shrink & no_heavy_decline
                      & no_s1_dafengche)
