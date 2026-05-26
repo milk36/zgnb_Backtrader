@@ -197,7 +197,14 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     last_str = _fmt_date(last_date)
     closed_trades = [t for t in trades if not t.get("partial")]
     partial_count = len(trades) - len(closed_trades)
-    title = f"{code} | {first_str} ~ {last_str}"
+    # 完美B1模式类型标注（取第一笔交易的pattern_type）
+    pt = trades[0].get("pattern_type", 0) if trades else 0
+    pt_prefix = ""
+    if pt > 0:
+        _PATTERN_NAMES = {1: "典型单波", 2: "白线不死叉", 3: "多波N型",
+                          4: "跌破反转", 5: "大牛市"}
+        pt_prefix = f"[{_PATTERN_NAMES.get(pt, '')}] "
+    title = f"{pt_prefix}{code} | {first_str} ~ {last_str}"
     if closed_trades:
         pnl_parts = " ".join(
             f"#{i+1}:{t['pnl_pct']:+.1f}%"

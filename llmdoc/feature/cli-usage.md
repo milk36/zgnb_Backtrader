@@ -20,6 +20,7 @@
 | `nxing_zhuan` | N型+砖 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2` | B2 倍量柱 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2_v2` | B2 V2 倍量柱（30日B1频次） | 组合模拟（默认）/ 仅扫描 |
+| `perfect_b1` | 完美B1（V4+5种模式过滤） | 组合模拟（默认）/ 仅扫描 |
 | `nxing_b1` | N型B1选股 | 组合模拟（默认）/ 仅扫描 |
 | `jinchai_b1` | 金叉B1选股 | 仅扫描（纯选股+K线图） |
 
@@ -94,7 +95,7 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `nxing_b1` / `jinchai_b1` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `perfect_b1` / `nxing_b1` / `jinchai_b1` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -104,7 +105,7 @@
 | `--scan-only` | flag | - | 仅扫描选股，不回测 |
 | `--portfolio` | flag | - | 组合级模拟模式（仅 `huangbai` 系列需要，`dongneng_zhuan` 默认即为组合模拟） |
 | `--no-plot` | flag | - | 禁用回测结果绘图（仅指定股票回测模式有图） |
-| `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。支持 V1/V2/V3 `--portfolio`、`dongneng_zhuan`、`nxing_zhuan`、`huangbai_b2`、`nxing_b1` 等组合模拟模式 |
+| `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。支持 V1/V2/V3 `--portfolio`、`dongneng_zhuan`、`nxing_zhuan`、`huangbai_b2`、`perfect_b1`、`nxing_b1` 等组合模拟模式 |
 | `--update-qfq-cache` | flag | - | 批量更新前复权缓存（需要网络）。不指定 `--update-qfq-codes` 时自动扫描通达信目录获取全市场股票列表 |
 | `--update-qfq-codes` | str[] | 无 | 指定更新前复权缓存的股票代码，需配合 `--update-qfq-cache` 使用 |
 
@@ -201,6 +202,22 @@ python main.py --strategy huangbai_b2 --scan-only
 python main.py --strategy huangbai_b2 --chart
 ```
 
+#### 完美B1策略
+
+```bash
+# 组合级模拟（默认模式，无需 --portfolio）
+python main.py --strategy perfect_b1
+
+# 自定义回测区间
+python main.py --strategy perfect_b1 --start 2024-06-01 --end 2025-12-31
+
+# 全市场扫描选股
+python main.py --strategy perfect_b1 --scan-only
+
+# 组合级模拟 + K线图
+python main.py --strategy perfect_b1 --chart
+```
+
 #### N型B1选股
 
 ```bash
@@ -284,6 +301,16 @@ python main.py --strategy kdj --symbol 600036
 - **退出逻辑**：复用 PortfolioSimulator 标准六级退出（止损→T+N→盈利100%→半仓持股→涨停卖半→中阳卖1/3）
 - **大盘MACD过滤**：同V2，空头日只卖不买
 
+#### 完美B1参数
+
+- **无需 `--portfolio`**：默认即组合级模拟
+- **不支持 `--symbol`**：仅支持全市场扫描模式
+- **`--stock-type`**：同黄白线系列，影响振幅阈值、中阳判断、涨停板计算
+- **资金/仓位**：复用 `PORTFOLIO_INITIAL_CASH=100万`、`PORTFOLIO_MAX_POSITIONS=10`、`PORTFOLIO_PER_POSITION=10万`，来自 `config.py`
+- **退出逻辑**：复用 PortfolioSimulator 标准六级退出（同V4）
+- **大盘MACD过滤**：同V2，空头日只卖不买
+- **核心差异**：在V4 B1基础上叠加5种模式质量过滤（典型单波/白线不死叉/多波N型/跌破反转/大牛市），过滤掉短期B1
+
 #### N型B1参数
 
 - **无需 `--portfolio`**：默认即组合级模拟
@@ -308,6 +335,7 @@ python main.py --strategy kdj --symbol 600036
 - `nxing_zhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `huangbai_b2` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `huangbai_b2_v2` 同样不支持单股回测（STRATEGIES 字典中值为 None）
+- `perfect_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `nxing_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `jinzhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `jinchai_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None，仅纯扫描+图表）

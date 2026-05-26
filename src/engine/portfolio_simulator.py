@@ -30,6 +30,8 @@ class Position:
         "white_break_pending", "white_break_bar",
         "has_accelerated", "max_price_since_buy",
         "surge_reduction_done", "sl_based_on_yellow",
+        # 完美B1模式
+        "pattern_type",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -63,6 +65,8 @@ class Position:
         self.surge_reduction_done = False
         self.sl_based_on_yellow = False
         self.macd_tp_done = False
+        # 完美B1模式类型
+        self.pattern_type = 0
 
 
 class PortfolioSimulator:
@@ -353,6 +357,10 @@ class PortfolioSimulator:
             yellow_at_buy=yellow_val, stop_loss=sl, size=shares,
         )
         pos.sl_based_on_yellow = False if "B2" in self._strategy_tag else (price < white_val)
+        # 完美B1: 记录买入时的模式类型
+        pt_arr = sig.get("pattern_type")
+        if pt_arr is not None:
+            pos.pattern_type = int(pt_arr[idx])
         self._positions[code] = pos
         self._cash -= total_cost
 
@@ -937,6 +945,7 @@ class PortfolioSimulator:
             "stop_loss": pos.stop_loss,
             "white_at_buy": pos.white_at_buy,
             "yellow_at_buy": pos.yellow_at_buy,
+            "pattern_type": pos.pattern_type,
         })
         self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 清仓 {code}  "
                   f"价格={price:.2f}  "
@@ -969,6 +978,7 @@ class PortfolioSimulator:
             "white_at_buy": pos.white_at_buy,
             "yellow_at_buy": pos.yellow_at_buy,
             "partial": True,
+            "pattern_type": pos.pattern_type,
         })
         remaining_cost = total_cost - pos.partial_proceeds
         avg_cost = remaining_cost / pos.size if pos.size > 0 else 0
