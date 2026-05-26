@@ -1,19 +1,27 @@
-"""完美B1策略
+"""完美B1 V2策略
 
-基于 thinking/完美B1.md 中6种量价模式，在V4 B1信号基础上增加模式质量过滤。
+基于 thinking/完美B1.md 中11种个股模式模板，在V4 B1信号基础上增加模式质量过滤。
 
 核心逻辑：
 1. V4 B1信号作为基础（七子条件OR + 盈亏比 + vol_expand_ok）
-2. 叠加5种模式匹配（OR），仅保留匹配强势模式的B1
-3. 过滤掉短期B1（缩量评分>35%且无其他强势模式）
+2. 叠加10种强势模式匹配（OR），仅保留匹配强势模式的B1
+3. 标记赢时胜预警模式（缩量>35%）作为反向参考
 4. 按缩量评分升序排序（缩量越极致优先级越高）
 
-五种模式：
-- 模式一：典型单波B1 — shrink<30% & J<14 & 贴近白/黄线
-- 模式二：白线不死叉B1 — 回调30天白线>黄线 & J<14
-- 模式三：多波N型B1 — 60日内>=2次上穿黄线 & shrink<26%
-- 模式四：跌破反转B1 — 收盘<黄线 & shrink<28% & J<14
-- 模式五：大牛市B1 — 收盘>黄线*1.30 & shrink<25%
+十种强势模式（每只个股独立模板）：
+- 模式1:  华纳药厂 — SB1超卖缩量拐头
+- 模式2:  宁波韵升 — 三波N型递进缩量
+- 模式3:  微芯生物 — 倍量柱快速启动
+- 模式4:  方正科技 — 双波递进B1
+- 模式5:  澄天伟业 — 白线不死叉+倍量柱B2
+- 模式6:  国轩高科 — 双波建仓+深度缩量回调
+- 模式7:  野马电池 — 跌破黄线反转B1
+- 模式8:  光电股份 — 长期多波极致缩量
+- 模式9:  新瀚新材 — 双倍量柱+超级爆发
+- 模式10: 昂利康 — 大牛市快速B1
+
+预警模式：
+- 模式11: 赢时胜 — 短期B1预警（缩量不极致，涨幅有限）
 
 架构：包装 V4 的 _compute_all_bar_signals()，叠加模式过滤，
 复用 PortfolioSimulator 的标准六级退出，100万/10只。
@@ -24,7 +32,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from MyTT import ABS, COUNT, CROSS, EVERY, HHV, MA, REF
+from MyTT import ABS, COUNT, CROSS, EVERY, HHV, LLV, MA, REF, SMA
 
 from config import (
     TDX_DIR, TDX_MARKET, SCAN_MAX_WORKERS,
@@ -36,9 +44,6 @@ from src.strategies.huangbai_b1_v4_strategy import (
     _compute_all_bar_signals as _v4_compute_all_bar_signals,
     _compute_signals as _v4_compute_signals,
     _get_all_codes,
-    load_market_index,
-    compute_market_macd,
-    compute_market_macd_for_trading_days,
 )
 from src.strategies.dongneng_zhuan_strategy import _load_capital_data
 
@@ -66,64 +71,99 @@ def _init_process(tdxdir, market):
 
 PATTERN_NAMES = {
     0: "不匹配",
-    1: "典型单波",
-    2: "白线不死叉",
-    3: "多波N型",
-    4: "跌破反转",
-    5: "大牛市",
+    1: "华纳药厂",
+    2: "宁波韵升",
+    3: "微芯生物",
+    4: "方正科技",
+    5: "澄天伟业",
+    6: "国轩高科",
+    7: "野马电池",
+    8: "光电股份",
+    9: "新瀚新材",
+    10: "昂利康",
+    11: "赢时胜(预警)",
 }
 
 
 def _compute_pattern_matches(C, white, yellow, shrink_score, J,
-                              dist_w, dist_y):
-    """计算5种模式匹配结果
+                              rsi3, pct_w, pct_y, v_ratio_60,
+                              vol_col_count, wave_count_60, wave_count_90,
+                              white_above_yellow_30, above_yellow_pct,
+                              recent_rise_30d, b1_count_30):
+    """计算11种个股模式匹配结果
 
-    Args:
-        C: 收盘价数组
-        white: 白线数组
-        yellow: 黄线数组
-        shrink_score: 缩量评分数组 (V/HHV(V,20))
-        J: KDJ-J值数组
-        dist_w: |C - white| / C * 100
-        dist_y: |C - yellow| / yellow * 100
-
-    Returns:
-        (pattern_1..5, pattern_type) — 5个布尔数组 + 模式编号数组
+    每个模式基于一只具体股票的真实量化数据作为匹配模板。
+    详情参考 thinking/完美B1.md "B1量价模式识别指南" 章节。
     """
     n = len(C)
+    _s = np.nan_to_num(shrink_score, nan=1.0)
+    _j = np.nan_to_num(J, nan=50.0)
+    _r = np.nan_to_num(rsi3, nan=50.0)
+    _pw = np.nan_to_num(pct_w, nan=0.0)
+    _py = np.nan_to_num(pct_y, nan=0.0)
+    _vr = np.nan_to_num(v_ratio_60, nan=1.0)
+    _vc = np.nan_to_num(vol_col_count, nan=0.0)
+    _w60 = np.nan_to_num(wave_count_60, nan=0.0)
+    _w90 = np.nan_to_num(wave_count_90, nan=0.0)
+    _ay = np.nan_to_num(above_yellow_pct, nan=0.0)
+    _rr = np.nan_to_num(recent_rise_30d, nan=1.0)
+    _bc = np.nan_to_num(b1_count_30, nan=0.0)
 
-    # 模式一：典型单波B1
-    # shrink<30% & J<14 & (贴近白线≤2.5% 或 贴近黄线≤10%)
-    p1 = (shrink_score < 0.30) & (J < 14) & ((dist_w <= 2.5) | (dist_y <= 10.0))
+    # 模式1: 华纳药厂 — SB1超卖缩量拐头
+    # 原型数据: shrink=24.5%, J=-4.5, RSI=22.9, vs黄线=-0.1%
+    p1 = (_s < 0.25) & (_j < -4) & (_r < 23) & (np.abs(_py) <= 1.0)
 
-    # 模式二：白线不死叉B1
-    # 30天内白线始终>=黄线 & J<14
-    white_above_yellow = EVERY(white >= yellow, 30)
-    p2 = white_above_yellow & (J < 14)
+    # 模式2: 宁波韵升 — 三波N型递进缩量
+    # 原型数据: 3波N型, shrink=25.3%, J=9.9, vs白线=+0.5%
+    p2 = (_w60 >= 3) & (_s < 0.26) & (_j < 13) & (np.abs(_pw) <= 2.0)
 
-    # 模式三：多波N型B1
-    # 60日内>=2次上穿黄线 & shrink<26%
-    cross_up = CROSS(C, yellow)
-    wave_count = COUNT(cross_up, 60)
-    p3 = (wave_count >= 2) & (shrink_score < 0.26)
+    # 模式3: 微芯生物 — 倍量柱快速启动
+    # 原型数据: shrink=29.7%, RSI=11.5, J=-10.8, 白线破黄线不破
+    p3 = (C < white) & (C > yellow) & (_r < 15) & (_j < -5) & (_s < 0.30)
 
-    # 模式四：跌破反转B1
-    # C<yellow & shrink<28% & J<14
-    p4 = (C < yellow) & (shrink_score < 0.28) & (J < 14)
+    # 模式4: 方正科技 — 双波递进B1
+    # 原型数据(第二波B1): shrink=24.8%, J=9.5, RSI=16.3, 30日内多次B1
+    p4 = (_bc >= 2) & (_s < 0.30) & (_j < 13) & (C < white) & (C > yellow)
 
-    # 模式五：大牛市B1
-    # C > yellow*1.30 & shrink<25%
-    above_yellow_pct = (C - yellow) / np.maximum(yellow, 0.001) * 100
-    p5 = (above_yellow_pct > 30) & (shrink_score < 0.25)
+    # 模式5: 澄天伟业 — 白线不死叉+倍量柱B2
+    # 原型数据: shrink=63.2%(偏高), J=6.0, 白线30天不死叉黄线
+    p5 = white_above_yellow_30 & (_j < 13)
 
-    # 模式编号（优先级：3>4>1>2>5，多波和跌破反转最可靠）
+    # 模式6: 国轩高科 — 双波建仓+深度缩量回调
+    # 原型数据: shrink=27.2%, V/MA60=40.2%, J=1.7, 白线不死叉
+    p6 = (white_above_yellow_30 & (_s < 0.28) & (_vr < 0.45)
+          & (_j < 5) & (C < white) & (C > yellow))
+
+    # 模式7: 野马电池 — 跌破黄线反转B1
+    # 原型数据: vs黄线=-6.4%, RSI=14.7, shrink=27.6%
+    p7 = (C < yellow) & (_r < 15) & (_s < 0.28)
+
+    # 模式8: 光电股份 — 长期多波极致缩量
+    # 原型数据: shrink=17.9%(最低), J=-6.0, 90日多次上穿黄线
+    p8 = (_s < 0.20) & (_j < 0) & (_w90 >= 2)
+
+    # 模式9: 新瀚新材 — 双倍量柱+超级爆发
+    # 原型数据: shrink=22.2%, vs黄线=-7.9%, 30日内2次倍量柱
+    p9 = (C < yellow) & (_s < 0.25) & (_vc >= 2)
+
+    # 模式10: 昂利康 — 大牛市快速B1
+    # 原型数据: vs黄线=+37.7%, shrink=24.5%, 31天+217.5%
+    p10 = (_ay > 30) & (_s < 0.25) & (_rr > 1.5)
+
+    # 模式11(预警): 赢时胜 — 短期B1
+    # 原型数据: shrink=37.1%(不极致), 后续仅+25%
+    p11 = (_s > 0.35)
+
+    strong_matched = p1 | p2 | p3 | p4 | p5 | p6 | p7 | p8 | p9 | p10
+
+    # 模式编号（优先级 8>9>1>7>3>6>2>4>10>5，高优先级后写覆盖）
     pattern_type = np.zeros(n, dtype=int)
-    # 逆序赋值，优先级高的后写覆盖
-    for pval, parr in [(5, p5), (2, p2), (1, p1), (4, p4), (3, p3)]:
+    for pval, parr in [(11, p11), (5, p5), (10, p10), (4, p4), (2, p2),
+                        (6, p6), (3, p3), (7, p7), (1, p1), (9, p9), (8, p8)]:
         pattern_type[parr] = pval
 
-    pattern_matched = p1 | p2 | p3 | p4 | p5
-    return p1, p2, p3, p4, p5, pattern_matched, pattern_type
+    return (p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11,
+            strong_matched, pattern_type)
 
 
 # ================================================================== #
@@ -132,8 +172,9 @@ def _compute_pattern_matches(C, white, yellow, shrink_score, J,
 
 
 def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
-    """完美B1: V4 B1 + 5种模式过滤"""
-    signals = _v4_compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares)
+    """完美B1 V2: V4 B1 + 11种个股模式过滤"""
+    signals = _v4_compute_all_bar_signals(C, H, L, O, V, dates, params,
+                                          capital_shares)
     if signals is None:
         return None
 
@@ -142,8 +183,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     yellow = signals["yellow"]
     shrink_score = signals["shrink_score"]
 
-    # 计算KDJ-J（从V4的_compute_all_bar_signals没有直接返回J值，需重新计算）
-    from MyTT import LLV, SMA
+    # ---- KDJ-J（与v1相同） ----
     llv9 = LLV(L, 9)
     hhv9 = HHV(H, 9)
     denom9 = hhv9 - llv9
@@ -152,28 +192,73 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     D = SMA(K, 3, 1)
     J = 3 * K - 2 * D
 
-    # 距离指标
-    dist_w = ABS(C - white) / np.maximum(C, 0.001) * 100
-    dist_y = ABS(C - yellow) / np.maximum(yellow, 0.001) * 100
+    # ---- V2新增指标 ----
 
-    # 模式匹配
-    p1, p2, p3, p4, p5, pattern_matched, pattern_type = _compute_pattern_matches(
-        C, white, yellow, shrink_score, J, dist_w, dist_y)
+    # RSI(3)
+    diff = C - REF(C, 1)
+    diff = np.nan_to_num(diff, nan=0.0)
+    up = SMA(np.maximum(diff, 0), 3, 1)
+    down = SMA(np.abs(diff), 3, 1)
+    rsi3 = np.where(down != 0, up / down * 100, 50.0)
 
-    # 完美B1 = V4 B1 & 至少匹配一种强势模式
-    signals["b1"] = b1_original & pattern_matched
+    # 签百分比（vs白线、vs黄线）
+    pct_w = (C - white) / np.maximum(white, 0.001) * 100
+    pct_y = (C - yellow) / np.maximum(yellow, 0.001) * 100
+
+    # V/MA(V,60) 60日均量比值
+    v_ma60 = MA(V, 60)
+    v_ratio_60 = V / np.maximum(v_ma60, 1)
+
+    # 倍量柱检测: V > 2 * REF(V,1)
+    vol_ratio = V / np.maximum(REF(V, 1), 1)
+    vol_col = (vol_ratio >= 2.0).astype(float)
+    vol_col_count = COUNT(vol_col, 30)
+
+    # 上穿黄线次数（60日/90日）
+    cross_up = CROSS(C, yellow)
+    wave_count_60 = COUNT(cross_up, 60)
+    wave_count_90 = COUNT(cross_up, 90)
+
+    # 白线30天不死叉黄线
+    white_above_yellow_30 = EVERY(white >= yellow, 30)
+
+    # vs黄线偏离百分比
+    above_yellow_pct = (C - yellow) / np.maximum(yellow, 0.001) * 100
+
+    # 30日涨幅比
+    recent_rise_30d = C / np.maximum(REF(C, 30), 0.001)
+
+    # 30日内B1信号次数（用于方正科技双波递进检测）
+    b1_count_30 = COUNT(b1_original.astype(float), 30)
+
+    # ---- 模式匹配 ----
+    (p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11,
+     strong_matched, pattern_type) = _compute_pattern_matches(
+        C, white, yellow, shrink_score, J,
+        rsi3, pct_w, pct_y, v_ratio_60,
+        vol_col_count, wave_count_60, wave_count_90,
+        white_above_yellow_30, above_yellow_pct,
+        recent_rise_30d, b1_count_30)
+
+    # 完美B1 = V4 B1 & 至少匹配一种强势模式(1-10)
+    signals["b1"] = b1_original & strong_matched
 
     # 保存辅助字段
     signals["b1_original"] = b1_original
     signals["pattern_type"] = pattern_type
-    signals["pattern_p1"] = p1
-    signals["pattern_p2"] = p2
-    signals["pattern_p3"] = p3
-    signals["pattern_p4"] = p4
-    signals["pattern_p5"] = p5
+    for i, p in enumerate([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11], 1):
+        signals[f"pattern_p{i}"] = p
     signals["J"] = J
-    signals["dist_w"] = dist_w
-    signals["dist_y"] = dist_y
+    signals["RSI"] = rsi3
+    signals["pct_w"] = pct_w
+    signals["pct_y"] = pct_y
+    signals["v_ratio_60"] = v_ratio_60
+    signals["vol_col_count"] = vol_col_count
+    signals["wave_count_60"] = wave_count_60
+    signals["wave_count_90"] = wave_count_90
+    signals["b1_count_30"] = b1_count_30
+    signals["dist_w"] = ABS(C - white) / np.maximum(C, 0.001) * 100
+    signals["dist_y"] = ABS(C - yellow) / np.maximum(yellow, 0.001) * 100
 
     # 不做B2涨幅排序，使用shrink_score排序（b2_sort_primary=inf）
     signals["b2_sort_primary"] = np.full(len(C), float('inf'))
@@ -182,7 +267,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
 
 
 def _compute_signals(C, H, L, O, V, dates, params):
-    """计算最新 bar 的完美B1信号"""
+    """计算最新 bar 的完美B1 V2信号"""
     all_bars = _compute_all_bar_signals(C, H, L, O, V, dates, params)
     if all_bars is None:
         return None
@@ -201,9 +286,13 @@ def _compute_signals(C, H, L, O, V, dates, params):
         "no_huge_vol_bearish": bool(all_bars["no_huge_vol_bearish"][i]),
         "close": float(C[i]),
         "J": float(all_bars["J"][i]),
-        "RSI": 0.0,
+        "RSI": float(all_bars["RSI"][i]),
         "shrink_score": float(all_bars["shrink_score"][i]),
         "pattern_type": int(all_bars["pattern_type"][i]),
+        "pct_w": float(all_bars["pct_w"][i]),
+        "pct_y": float(all_bars["pct_y"][i]),
+        "v_ratio_60": float(all_bars["v_ratio_60"][i]),
+        "vol_col_count": int(all_bars["vol_col_count"][i]),
         "b1_original": bool(all_bars["b1_original"][i]),
     }
 
@@ -245,29 +334,12 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
 def scan_all(stock_type="main", skip_weekly=False,
              tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS,
              skip_on_bear=False):
-    """完美B1全市场扫描（含大盘MACD过滤）"""
+    """完美B1 V2全市场扫描（不做大盘MACD过滤）"""
     from concurrent.futures import ProcessPoolExecutor, as_completed
-
-    # 检查大盘MACD状态
-    market_macd_ok = True
-    market_df = load_market_index(tdxdir, market)
-    if market_df is not None and len(market_df) > 0:
-        market_close = market_df["close"].values.astype(float)
-        _, _, bullish = compute_market_macd(market_close)
-        market_macd_ok = bool(bullish[-1])
-        status = "多头" if market_macd_ok else "空头"
-        print(f"  大盘MACD状态: {status} (最新收盘={market_close[-1]:.2f})")
-        if not market_macd_ok:
-            if skip_on_bear:
-                print("  大盘MACD处于空头区间，跳过扫描 (skip_on_bear=True)")
-                return [], market_macd_ok
-            print("  大盘MACD处于空头区间，仅扫描不执行买入")
-    else:
-        print("  警告: 无法获取大盘MACD数据，跳过大盘过滤")
 
     codes = _get_all_codes(tdxdir)
     total = len(codes)
-    print(f"扫描 {total} 只A股(完美B1)... (workers={max_workers or 'auto'})")
+    print(f"扫描 {total} 只A股(完美B1 V2)... (workers={max_workers or 'auto'})")
 
     params = {
         "m1": HUANGBAI_M1, "m2": HUANGBAI_M2, "m3": HUANGBAI_M3, "m4": HUANGBAI_M4,
@@ -302,7 +374,8 @@ def scan_all(stock_type="main", skip_weekly=False,
                 pt = sig.get("pattern_type", 0)
                 pname = PATTERN_NAMES.get(pt, "?")
                 print(f"  {code}  C={sig['close']:.2f}  "
-                      f"J={sig['J']:.1f}  缩量={sig['shrink_score']:.3f}  "
+                      f"J={sig['J']:.1f}  RSI={sig['RSI']:.1f}  "
+                      f"缩量={sig['shrink_score']:.3f}  "
                       f"模式={pname}")
             if done % 500 == 0:
                 print(f"  ... 已扫描 {done}/{total} ({done/total*100:.0f}%)  "
@@ -311,26 +384,24 @@ def scan_all(stock_type="main", skip_weekly=False,
     elapsed = time.time() - t0
     results.sort(key=lambda x: x["shrink_score"])
 
-    print(f"\n{'=' * 55}")
-    print(f"  完美B1扫描完成: {total} 只  命中 {len(results)} 只  "
+    print(f"\n{'=' * 60}")
+    print(f"  完美B1 V2扫描完成: {total} 只  命中 {len(results)} 只  "
           f"错误 {errors}  耗时 {elapsed:.1f}s")
-    print(f"{'=' * 55}")
+    print(f"{'=' * 60}")
 
     if results:
         print(f"\n  选股结果（按缩量排序）")
-        print(f"{'=' * 55}")
+        print(f"{'=' * 60}")
         for r in results:
             tag = " <<< TOP" if r == results[0] else ""
             pt = r.get("pattern_type", 0)
             pname = PATTERN_NAMES.get(pt, "?")
             print(f"  {r['code']}  C={r['close']:.2f}  "
-                  f"J={r['J']:.1f}  缩量={r['shrink_score']:.3f}  "
+                  f"J={r['J']:.1f}  RSI={r.get('RSI',0):.1f}  "
+                  f"缩量={r['shrink_score']:.3f}  "
                   f"模式={pname}{tag}")
 
-    if not market_macd_ok:
-        print("  注意: 大盘MACD空头，扫描结果仅供参考")
-
-    return results, market_macd_ok
+    return results, True
 
 
 # ================================================================== #
@@ -368,16 +439,16 @@ def _scan_one_all_bars(code, params):
 def preload_all_signals(start="2024-01-01", end="2025-12-31",
                         stock_type="main", max_workers=SCAN_MAX_WORKERS,
                         tdxdir=TDX_DIR, market=TDX_MARKET):
-    """完美B1预加载（含大盘MACD过滤）
+    """完美B1 V2预加载（不做大盘MACD过滤）
 
     Returns:
-        (all_signals, trading_days, market_macd_bullish)
+        (all_signals, trading_days, None) — 第三项始终为None，兼容调用方解包
     """
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     codes = _get_all_codes(tdxdir)
     total = len(codes)
-    print(f"预加载 {total} 只A股信号(完美B1)... (workers={max_workers or 'auto'})")
+    print(f"预加载 {total} 只A股信号(完美B1 V2)... (workers={max_workers or 'auto'})")
 
     capital_data = _load_capital_data(tdxdir)
     if capital_data:
@@ -446,16 +517,4 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
         for ed in error_details:
             print(f"  错误: {ed}")
 
-    # 计算大盘MACD多头状态
-    market_macd_bullish = None
-    if len(trading_days) > 0:
-        print("  计算大盘MACD状态...")
-        market_macd_bullish = compute_market_macd_for_trading_days(
-            trading_days, tdxdir, market)
-        if market_macd_bullish is not None:
-            bull_count = np.sum(market_macd_bullish)
-            total_days = len(market_macd_bullish)
-            print(f"  大盘MACD多头天数: {bull_count}/{total_days} "
-                  f"({bull_count/total_days*100:.1f}%)")
-
-    return all_signals, trading_days, market_macd_bullish
+    return all_signals, trading_days, None

@@ -32,6 +32,7 @@ class Position:
         "surge_reduction_done", "sl_based_on_yellow",
         # 完美B1模式
         "pattern_type",
+        "profit_80pct_done",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -67,6 +68,7 @@ class Position:
         self.macd_tp_done = False
         # 完美B1模式类型
         self.pattern_type = 0
+        self.profit_80pct_done = False
 
 
 class PortfolioSimulator:
@@ -431,6 +433,18 @@ class PortfolioSimulator:
             max_gain = (pos.max_price_since_buy - pos.buy_price) / pos.buy_price * 100
             real_gain = (price - avg_cost) / avg_cost * 100
 
+            # 0. 完美B1: 涨幅>80%强行止盈，保留1/4仓位（最高优先级）
+            if ("完美B1" in self._strategy_tag
+                    and not pos.profit_80pct_done
+                    and pct_gain >= 80):
+                target_size = max(1, pos.initial_size // 4)
+                sell_size = pos.size - target_size
+                if sell_size > 0:
+                    self._sell_partial(code, pos, sell_size, price, date, "涨幅80%止盈卖3/4")
+                    pos.profit_80pct_done = True
+                    pos.hold_until_below_white = True
+                continue
+
             # 1. 止损
             if price <= pos.stop_loss:
                 cur_idx = self._td_index.get(date)
@@ -529,7 +543,8 @@ class PortfolioSimulator:
                         self._sell_position(code, pos, price, date, "止盈放飞后放量阴线清仓")
                         to_remove.append(code)
                         continue
-                continue  # 不满足卖出条件，跳过后续所有卖出
+                    continue  # 白线之上不满足卖出条件，跳过后续
+                # 白线之下：走跟踪止损逻辑（不 continue，落入下方 3.5）
 
             # 3.5 部分卖出后白线/黄线跟踪止损
             if pos.partial_sold and not pos.hold_until_below_white:

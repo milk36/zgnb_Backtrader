@@ -75,6 +75,7 @@ from src.strategies.jinzhuan_strategy import scan_all as scan_all_jzh
 from src.strategies.huangbai_b2_strategy import scan_all as scan_all_b2
 from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
 from src.strategies.perfect_b1_strategy import scan_all as scan_all_pb1
+from src.strategies.perfect_b1_v2_strategy import scan_all as scan_all_pb1v2
 from src.strategies.nxing_b1_scan_strategy import (
     scan_all_nx_b1,
     preload_all_signals as preload_nx_b1,
@@ -94,6 +95,7 @@ STRATEGIES = {
     "huangbai_b2": None,     # B2倍量柱：仅支持组合级模拟+扫描
     "huangbai_b2_v2": None,  # B2_V2倍量柱：30日B1频次过滤，仅支持组合级模拟+扫描
     "perfect_b1": None,     # 完美B1：V4 B1+5种模式质量过滤，仅支持组合级模拟+扫描
+    "perfect_b1_v2": None,  # 完美B1 V2：V4 B1+11种个股模式质量过滤，仅支持组合级模拟+扫描
     "nxing_b1": None,       # N型B1选股：组合级模拟+扫描，不支持单股回测
     "jinchai_b1": None,     # 金叉B1选股：纯扫描+图表，不支持回测
 }
@@ -395,7 +397,7 @@ def main():
         print("  完美B1: V4 B1 + 5种模式质量过滤")
         print("  阶段1: 预加载全市场信号数据")
         print("=" * 55)
-        all_signals, trading_days, _ = preload_pb1(
+        all_signals, trading_days, market_macd_bullish = preload_pb1(
             start=args.start, end=args.end,
             stock_type=args.stock_type)
 
@@ -420,13 +422,68 @@ def main():
             commission=COMMISSION,
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
-            market_macd_bullish=None,
+            market_macd_bullish=market_macd_bullish,
             strategy_tag="[完美B1]",
             cli_args=args)
         sim.run()
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file,
                                         strategy_tag="[完美B1]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        return
+
+    # ---- 完美B1 V2策略 ----
+    if args.strategy == "perfect_b1_v2":
+        if args.scan or args.scan_only:
+            print("=" * 60)
+            print("  完美B1 V2 全市场选股扫描")
+            print("  条件: V4 B1 + 11种个股模式质量过滤")
+            print("=" * 60)
+            scan_all_pb1v2(stock_type=args.stock_type)
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.perfect_b1_v2_strategy import preload_all_signals as preload_pb1v2
+
+        print("=" * 60)
+        print("  完美B1 V2: V4 B1 + 11种个股模式质量过滤")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 60)
+        all_signals, trading_days, _ = preload_pb1v2(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 60}")
+        print(f"  阶段2: 完美B1 V2组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
+              f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
+              f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        print(f"{'=' * 60}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PORTFOLIO_INITIAL_CASH,
+            max_positions=PORTFOLIO_MAX_POSITIONS,
+            per_position_cash=PORTFOLIO_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=None,
+            strategy_tag="[完美B1V2]",
+            cli_args=args)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[完美B1V2]")
 
         if args.chart:
             from src.charting import generate_charts
