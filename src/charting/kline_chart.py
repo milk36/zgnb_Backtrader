@@ -201,8 +201,14 @@ def _plot_single_stock(code, sig, trades, output_dir, sub_chart="volume"):
     pt = trades[0].get("pattern_type", 0) if trades else 0
     pt_prefix = ""
     if pt > 0:
-        _PATTERN_NAMES = {1: "典型单波", 2: "白线不死叉", 3: "多波N型",
-                          4: "跌破反转", 5: "大牛市"}
+        if pt <= 5:
+            _PATTERN_NAMES = {1: "典型单波", 2: "白线不死叉", 3: "多波N型",
+                              4: "跌破反转", 5: "大牛市"}
+        else:
+            _PATTERN_NAMES = {1: "华纳药厂", 2: "宁波韵升", 3: "微芯生物",
+                              4: "方正科技", 5: "澄天伟业", 6: "国轩高科",
+                              7: "野马电池", 8: "光电股份", 9: "新瀚新材",
+                              10: "昂利康", 11: "赢时胜(预警)"}
         pt_prefix = f"[{_PATTERN_NAMES.get(pt, '')}] "
     title = f"{pt_prefix}{code} | {first_str} ~ {last_str}"
     if closed_trades:
