@@ -440,9 +440,11 @@ def main():
         if args.scan or args.scan_only:
             print("=" * 60)
             print("  完美B1 V2 全市场选股扫描")
-            print("  条件: V4 B1 + 11种个股模式质量过滤")
+            print("  条件: V4 B1 + 11种个股模式质量过滤 + 大盘MACD多头")
             print("=" * 60)
-            scan_all_pb1v2(stock_type=args.stock_type)
+            results, market_macd_ok = scan_all_pb1v2(stock_type=args.stock_type)
+            if not market_macd_ok and not results:
+                print("\n大盘MACD空头，无符合条件的股票。")
             return
 
         from src.engine.portfolio_simulator import PortfolioSimulator
@@ -452,7 +454,7 @@ def main():
         print("  完美B1 V2: V4 B1 + 11种个股模式质量过滤")
         print("  阶段1: 预加载全市场信号数据")
         print("=" * 60)
-        all_signals, trading_days, _ = preload_pb1v2(
+        all_signals, trading_days, market_macd_bullish = preload_pb1v2(
             start=args.start, end=args.end,
             stock_type=args.stock_type)
 
@@ -466,6 +468,8 @@ def main():
         print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
               f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
               f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
         print(f"{'=' * 60}")
 
         sim = PortfolioSimulator(
@@ -477,7 +481,7 @@ def main():
             commission=COMMISSION,
             stock_type=args.stock_type,
             log_dir=LOG_DIR,
-            market_macd_bullish=None,
+            market_macd_bullish=market_macd_bullish,
             strategy_tag="[完美B1V2]",
             cli_args=args)
         sim.run()

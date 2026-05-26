@@ -39,11 +39,15 @@ from config import (
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
     DNZH_MIN_MARKET_CAP,
+    MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 from src.strategies.huangbai_b1_v4_strategy import (
     _compute_all_bar_signals as _v4_compute_all_bar_signals,
     _compute_signals as _v4_compute_signals,
     _get_all_codes,
+    compute_market_macd,
+    compute_market_macd_for_trading_days,
+    load_market_index,
 )
 from src.strategies.dongneng_zhuan_strategy import _load_capital_data
 
@@ -334,8 +338,20 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
 def scan_all(stock_type="main", skip_weekly=False,
              tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS,
              skip_on_bear=False):
-    """完美B1 V2全市场扫描（不做大盘MACD过滤）"""
+    """完美B1 V2全市场扫描（含大盘MACD多头过滤）"""
     from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    # 计算大盘MACD状态
+    market_macd_ok = True
+    market_df = load_market_index(tdxdir, market)
+    if market_df is not None:
+        market_close = market_df["close"].values.astype(float)
+        _, _, market_bullish = compute_market_macd(market_close)
+        market_macd_ok = bool(market_bullish[-1])
+        status = "多头" if market_macd_ok else "空头(只卖不买)"
+        print(f"  大盘MACD状态: {status}")
+    else:
+        print("  警告: 无法加载大盘指数数据，大盘MACD过滤将被跳过")
 
     codes = _get_all_codes(tdxdir)
     total = len(codes)
@@ -361,7 +377,7 @@ def scan_all(stock_type="main", skip_weekly=False,
         initargs=(tdxdir, market),
     ) as pool:
         futures = {
-            pool.submit(_scan_one, code, params, skip_weekly, True): code
+            pool.submit(_scan_one, code, params, skip_weekly, market_macd_ok): code
             for code in codes
         }
         for future in as_completed(futures):
@@ -401,7 +417,7 @@ def scan_all(stock_type="main", skip_weekly=False,
                   f"缩量={r['shrink_score']:.3f}  "
                   f"模式={pname}{tag}")
 
-    return results, True
+    return results, market_macd_ok
 
 
 # ================================================================== #
@@ -439,10 +455,11 @@ def _scan_one_all_bars(code, params):
 def preload_all_signals(start="2024-01-01", end="2025-12-31",
                         stock_type="main", max_workers=SCAN_MAX_WORKERS,
                         tdxdir=TDX_DIR, market=TDX_MARKET):
-    """完美B1 V2预加载（不做大盘MACD过滤）
+    """完美B1 V2预加载（含大盘MACD多头过滤）
 
     Returns:
-        (all_signals, trading_days, None) — 第三项始终为None，兼容调用方解包
+        (all_signals, trading_days, market_macd_bullish) —
+        market_macd_bullish 为每日大盘MACD多头布尔数组
     """
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -517,4 +534,16 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
         for ed in error_details:
             print(f"  错误: {ed}")
 
-    return all_signals, trading_days, None
+    # 计算大盘MACD多头状态
+    market_macd_bullish = None
+    if len(trading_days) > 0:
+        print("  计算大盘MACD状态...")
+        market_macd_bullish = compute_market_macd_for_trading_days(
+            trading_days, tdxdir, market)
+        if market_macd_bullish is not None:
+            bull_count = np.sum(market_macd_bullish)
+            total_days = len(market_macd_bullish)
+            print(f"  大盘MACD多头天数: {bull_count}/{total_days} "
+                  f"({bull_count/total_days*100:.1f}%)")
+
+    return all_signals, trading_days, market_macd_bullish
