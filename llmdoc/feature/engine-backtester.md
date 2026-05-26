@@ -59,6 +59,8 @@
 
 #### 止损止盈逻辑（优先级从高到低）
 
+0. **涨幅80%止盈卖3/4**：`pct_gain>=80` 时卖出3/4仓位保留1/4，设置 `hold_until_below_white=True`，通过 `profit_80pct_done` 字段防止重复触发。所有策略通用（不再限定"完美B1"）
+0.5. **达到目标价止盈卖1/3**：价格达到盈亏比高点（`wave_high_target`，由 `_compute_wave_high_at()` 计算的买入时前一波黄线之上阳线最高价）时卖出1/3仓位。通过 `target_tp_done` 字段确保仅触发一次
 1. **止损**：白线之上买入→买入日最低价止损；白线黄线之间→黄线价止损；黄线之下→买入日最低价止损
 2. **巨量阴线清仓**：当日满足 V>REF(V,1)*3 & V>MA(V,20)*3 & C<O & (O-C)/O>3%（`huge_vol_bearish`），最高优先级清仓，仅次于止损
 3. **T+N没涨清仓**：持仓>=N日且价格<=买入价
@@ -97,7 +99,9 @@
 
 - Backtester 的 `run()` 每次调用都会重新添加分析器，不应重复调用
 - Backtester 的 `plot()` 依赖 matplotlib，在无 GUI 环境中需配合 `Agg` 后端
-- PortfolioSimulator 的卖出逻辑与 `HuangBaiB1Strategy._check_exit()` 保持同步，含止损/巨量阴线清仓/T+N/盈利100%/半仓持股/涨停卖半/中阳卖1/3 七级优先级
+- PortfolioSimulator 的卖出逻辑与 `HuangBaiB1Strategy._check_exit()` 保持同步，含涨幅80%止盈/目标价止盈/止损/巨量阴线清仓/T+N/盈利100%/半仓持股/涨停卖半/中阳卖1/3 九级优先级
+- **止盈放飞后continue缺陷已修复**：`portfolio_simulator.py` 行531~547 为正确参考实现，`continue` 仅在白线之上分支内执行
+- **80%止盈已通用化**：不再限定"完美B1"策略标签，Position 的 `profit_80pct_done` 字段为所有策略共用
 - PortfolioSimulator 的 `_find_bar_index()` 使用 `searchsorted` 查找最近的前一个交易日，处理停牌场景
 - 清仓收益使用总回款（含部分卖出累计）vs 总成本计算，非最终卖出价 vs 买入价
 - `market_macd_bullish` 长度必须与 `trading_days` 一致，否则抛出 `ValueError`

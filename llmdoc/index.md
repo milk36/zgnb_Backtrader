@@ -14,13 +14,13 @@
 - [策略层：黄白线B2倍量柱策略](feature/strategy-huangbai-b2.md): 包装V4信号计算，将B1入场替换为"前日B1+当日倍量柱"时序联动条件，移除动能过滤。倍量柱定义：VOL>1.8*REF(VOL,1) AND C>O AND VOL>MA(VOL,40) 且首次出现。巨量阴线过滤通过V4信号传递。复用PortfolioSimulator标准六级退出，100万/10只。理解B2包装架构或倍量柱逻辑时参考。
 - [策略层：黄白线B2_V2倍量柱策略](feature/strategy-huangbai-b2-v2.md): B2增强版，新增30日B1频次过滤（至少2次B1信号且间隔≥5天），排序改为缩量升序+流动市值降序并只取前1支。巨量阴线过滤通过V4信号传递。其余架构与B2一致（包装V4、倍量柱入场、复用六级退出）。
 - [策略层：完美B1策略](feature/strategy-perfect-b1.md): 包装V4信号计算，在V4 B1基础上叠加5种量价模式质量过滤（典型单波、白线不死叉、多波N型、跌破反转、大牛市，OR关系）。独立计算KDJ-J值和距离指标用于模式匹配。复用PortfolioSimulator标准六级退出，100万/10只，按缩量评分升序排序。理解完美B1包装架构或模式匹配逻辑时参考。
-- [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装（单股回测）；PortfolioSimulator 组合级日频模拟引擎（100万/10只/每只10万）。含巨量阴线清仓退出（仅次于止损）。理解回测执行流程时参考。
+- [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装（单股回测）；PortfolioSimulator 组合级日频模拟引擎（100万/10只/每只10万）。含涨幅80%止盈、目标价止盈（盈亏比高点卖1/3）、巨量阴线清仓等九级退出。理解回测执行流程时参考。
 - [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+B1信号标记+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。
 - [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系。运行回测时首先阅读此文档。
 
 - [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛→筹码密集过滤的串行过滤策略，包含综合天命打分、阵营过滤、流通市值过滤、砖型图强红共振（含前日缩量/大涨横盘放量/砖块质量三个附加条件）、60日VWAP筹码密集、突然放巨量阴线过滤、T+1开盘买入及三级退出逻辑。
 - [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、T+1合规检查、五级退出（止损→巨量阴线清仓→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、模拟结束强制清仓、MinuteFeed分钟数据支持。通过 strategy_tag 和参数差异化，N型砖策略复用同一模拟器。
-- [引擎层：N型B1组合级模拟器](feature/engine-nxing-b1-simulator.md): NxingB1Simulator 日频模拟引擎，复用PortfolioSimulator六级退出逻辑（含巨量阴线清仓），100万/10只/每只10万，T+1开盘价买入，按缩量评分升序取最优1只，冷却期10个交易日。涉及N型B1组合模拟回测时参考。
+- [引擎层：N型B1组合级模拟器](feature/engine-nxing-b1-simulator.md): NxingB1Simulator 日频模拟引擎，复用PortfolioSimulator退出逻辑（含涨幅80%止盈、目标价止盈卖1/3、巨量阴线清仓等），100万/10只/每只10万，T+1开盘价买入，按缩量评分升序取最优1只，冷却期10个交易日。已修复止盈放飞后continue缺陷。涉及N型B1组合模拟回测时参考。
 - [策略层：N型+砖策略](feature/strategy-nxing-zhuan.md): 动能砖的变体策略，仅使用金砖共振信号选股（跳过动能预过滤和筹码密集过滤），外加流通市值>50亿过滤。巨量阴线过滤通过动能砖信号传递。T+1日线开盘买入（无分钟确认），复用 DongnengZhuanSimulator 模拟器。
 - [策略层：N型B1选股策略](feature/strategy-nxing-b1-scan.md): N型B1策略支持选股扫描和组合级模拟两种模式。选股扫描：60日内>=2次B1信号（间隔>=30天）且价格逐次抬高的N型结构筛选，统计T+3涨幅胜率。组合模拟：预加载全市场N型B1信号，100万/10只/每只10万，T+1开盘买入，六级退出。复用V4的B1七子条件、vol_expand_ok过滤链和突然放巨量阴线过滤。
 - [策略层：金叉B1选股策略](feature/strategy-jinchai-b1-scan.md): 纯选股扫描策略，筛选白线刚刚金叉黄线后出现B1信号的股票。流通市值>50亿，复用N型B1的B1七子条件、vol_expand_ok过滤链、突然放巨量阴线过滤、8项假案例排除。统计T+5涨幅>=10%的概率，支持日期区间筛选，自动生成K线图。不支持回测和组合模拟。

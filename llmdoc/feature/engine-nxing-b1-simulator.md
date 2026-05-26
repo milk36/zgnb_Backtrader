@@ -35,8 +35,10 @@ N型B1策略的组合级日频模拟引擎，复用 PortfolioSimulator 的六级
 
 冷却期：清仓后10个交易日内不再买入同一股票。
 
-### 六级退出逻辑（与 PortfolioSimulator 一致）
+### 七级退出逻辑（与 PortfolioSimulator 一致）
 
+0. **涨幅80%止盈卖3/4** -- `pct_gain>=80` 时卖3/4仓位保留1/4，设置 `hold_until_below_white=True`，最高优先级
+0.5. **达到目标价止盈卖1/3** -- 价格达到盈亏比高点（`wave_high_target`，由 `_compute_wave_high_at()` 计算的买入时前一波黄线之上阳线最高价）时卖1/3仓位。通过 `target_tp_done` 字段确保仅触发一次
 1. **止损** -- 跌破止损价
 2. **巨量阴线清仓** -- V>REF(V,1)*3 & V>MA(V,20)*3 & C<O & (O-C)/O>3%（`huge_vol_bearish`），仅次于止损的最高优先级
 3. **跌破黄线清仓** -- 买入价>=黄线时，价格跌破当前黄线
@@ -61,6 +63,8 @@ N型B1策略的组合级日频模拟引擎，复用 PortfolioSimulator 的六级
 
 - 退出逻辑与 PortfolioSimulator 保持同步，但无观察池/周线多头过滤/大盘MACD过滤，直接使用全市场信号
 - **巨量阴线清仓**通过信号字典的 `huge_vol_bearish` 字段判断，在止损之后检查
+- **止盈放飞后continue缺陷已修复**：`if pos.partial_sold` 块中的 `continue` 已移入 `if price >= white_val` 分支，白线之下不再跳过，正确落入后续白线/黄线跟踪止损逻辑
+- **80%止盈规则已通用化**：不再限定"完美B1"策略，所有策略涨幅>=80%均触发卖3/4仓位。`profit_80pct_done` 字段防止重复触发
 - `preload_all_signals()` 中的 `_scan_one_all_bars_nx()` 对每个B1日运行完整的 N型检测 + 8项排除过滤，预加载阶段耗时长
 - Position 使用 `__slots__` 优化内存，字段与 PortfolioSimulator 的 Position 类一致
 - 日志文件前缀 `nxb1_portfolio_`，输出到 `logs/` 目录

@@ -33,6 +33,8 @@ class Position:
         # 完美B1模式
         "pattern_type",
         "profit_80pct_done",
+        # 目标价止盈
+        "wave_high_target", "target_tp_done",
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -69,6 +71,9 @@ class Position:
         # 完美B1模式类型
         self.pattern_type = 0
         self.profit_80pct_done = False
+        # 目标价止盈
+        self.wave_high_target = 0.0
+        self.target_tp_done = False
 
 
 class PortfolioSimulator:
@@ -139,6 +144,34 @@ class PortfolioSimulator:
         if idx < 0:
             return None
         return idx
+
+    @staticmethod
+    def _compute_wave_high_at(sig, idx):
+        """计算买入时的盈亏比高点（前一波黄线之上阳线最高价）
+
+        从idx向前扫描，找到黄线之上最近一波连续阳线区间的最高价。
+        逻辑同 kline_chart.py 的 wave_high 计算。
+        """
+        yellow = sig.get("yellow")
+        if yellow is None or idx < 0:
+            return 0.0
+        C = sig["close"]
+        H = sig["high"]
+        n = min(idx + 1, len(C))
+        peak = 0.0
+        in_yellow = False
+        for i in range(n):
+            if np.isnan(yellow[i]):
+                continue
+            above_yellow = C[i] >= yellow[i]
+            is_yang = C[i] >= sig["open"][i]
+            if above_yellow and not in_yellow:
+                # 刚站上黄线，重置peak
+                peak = H[i] if is_yang else 0.0
+            elif above_yellow and is_yang:
+                peak = max(peak, H[i])
+            in_yellow = above_yellow
+        return float(peak) if peak > 0 else 0.0
 
     def _log_macd_summary(self):
         """输出大盘MACD多头/空头日期区间摘要"""
@@ -363,6 +396,8 @@ class PortfolioSimulator:
         pt_arr = sig.get("pattern_type")
         if pt_arr is not None:
             pos.pattern_type = int(pt_arr[idx])
+        # 盈亏比高点（买入目标价格）
+        pos.wave_high_target = self._compute_wave_high_at(sig, idx)
         self._positions[code] = pos
         self._cash -= total_cost
 
@@ -433,16 +468,24 @@ class PortfolioSimulator:
             max_gain = (pos.max_price_since_buy - pos.buy_price) / pos.buy_price * 100
             real_gain = (price - avg_cost) / avg_cost * 100
 
-            # 0. 完美B1: 涨幅>80%强行止盈，保留1/4仓位（最高优先级）
-            if ("完美B1" in self._strategy_tag
-                    and not pos.profit_80pct_done
-                    and pct_gain >= 80):
+            # 0. 涨幅>80%止盈，保留1/4仓位（最高优先级）
+            if not pos.profit_80pct_done and pct_gain >= 80:
                 target_size = max(1, pos.initial_size // 4)
                 sell_size = pos.size - target_size
                 if sell_size > 0:
                     self._sell_partial(code, pos, sell_size, price, date, "涨幅80%止盈卖3/4")
                     pos.profit_80pct_done = True
                     pos.hold_until_below_white = True
+                continue
+
+            # 0.5 达到目标价止盈卖1/3（盈亏比高点）
+            if (not pos.target_tp_done
+                    and pos.wave_high_target > 0
+                    and price >= pos.wave_high_target):
+                sell_size = max(1, pos.size // 3)
+                if sell_size < pos.size:
+                    self._sell_partial(code, pos, sell_size, price, date, "达到目标价卖1/3")
+                    pos.target_tp_done = True
                 continue
 
             # 1. 止损
