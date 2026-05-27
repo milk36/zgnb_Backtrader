@@ -69,20 +69,13 @@ JCB1_MAX_CROSS_CYCLES = 1   # 最大允许交叉周期数（超过则排除）
 # ================================================================== #
 
 def _find_prev_wave_high(H, C, yellow, ref_idx, lookback=60):
-    """找到B1之前最近一波上涨（价格>=黄线）的最高点"""
+    """找到B1之前黄线之上阳线的最高点（不因穿越重置）"""
     start = max(0, ref_idx - lookback)
-    # Step 1: 往回跳过回踩区间（价格 < 黄线）
-    i = ref_idx
-    while i > start and C[i] < yellow[i]:
-        i -= 1
-    # Step 2: i 处价格 >= 黄线，继续往回找到这波上涨的起点
-    wave_end = i
-    wave_start = i
-    while i >= start and C[i] >= yellow[i]:
-        wave_start = i
-        i -= 1
-    # Step 3: 这波上涨的最高价
-    return float(np.max(H[wave_start:wave_end + 1]))
+    peak = 0.0
+    for i in range(start, ref_idx + 1):
+        if C[i] >= yellow[i]:
+            peak = max(peak, H[i])
+    return float(peak)
 
 
 def _check_risk_reward(C, H, yellow, ref_idx, min_ratio=JCB1_MIN_RISK_REWARD):

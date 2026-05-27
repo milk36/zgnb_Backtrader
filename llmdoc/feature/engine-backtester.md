@@ -38,7 +38,7 @@
 1. `run()` 逐日遍历交易日历：
    - 每月首个交易日更新观察池（遍历全市场找 `weekly_bull=True` 的股票）
    - 每日：大盘MACD空头时跳过买入（V2 模式）
-   - 每日：从观察池筛选 `gc_ok + b1 + vol_expand_ok` 候选，按 `(shrink_score升序, avg_amount_20降序, chip_spread升序)` 三键排序取第1名买入（缩量优先，市值大者优先，筹码集中度优先）
+   - 每日：从观察池筛选 `gc_ok + b1 + vol_expand_ok` 候选，按 `(shrink_score升序, avg_amount_20降序, chip_spread升序)` 三键排序取前 `max_daily_buys` 名买入（默认 1 名，V4多仓为 2 名）
    - `vol_expand_ok` 过滤链：前期放量支撑 + 缩量快速拉升排除 + 连续涨停缩量排除 + 连续上涨后放量下跌排除 + S1/大风车排除（加速上涨后天量大阴线/历史天量长上下影阴线）
    - `no_huge_vol_bearish`：60日内无突然放巨量阴线（V>REF(V,1)*3 & V>MA(V,20)*3 & C<O & (O-C)/O>3%）
    - 每日：检查持仓卖出条件（止损→巨量阴线清仓→T+N→盈利100%清仓→半仓持股模式→涨停卖半→中阳卖1/3(需当日上涨)）
@@ -46,7 +46,8 @@
 
 #### 仓位管理
 
-- 初始资金 100 万，最多 10 只，每只 10 万
+- 初始资金 100 万，最多 10 只，每只 10 万（V4多仓：100万/不限仓位数/每只10万）
+- `max_daily_buys` 参数（默认 1）：每日最多买入候选中的前 N 只。`_check_entries()` 循环遍历排序后的候选列表，逐只买入直到达到 `max_daily_buys` 或 `max_positions` 或现金不足
 - 买入股数按 100 股整手计算：`int(per_position_cash / (price * (1+commission)) / 100) * 100`
 - T+N 按交易日计算（通过 trading_days 索引差值）
 - Position 维护 `partial_proceeds` 累计部分卖出回款，用于摊薄成本价计算
@@ -92,8 +93,8 @@
 ## 3. Relevant Code Modules
 
 - `src/engine/backtester.py` - Backtester 单股回测类
-- `src/engine/portfolio_simulator.py` - PortfolioSimulator 组合模拟器（Position 数据类）
-- `config.py` - `INITIAL_CASH`, `COMMISSION`, `PORTFOLIO_INITIAL_CASH`, `PORTFOLIO_MAX_POSITIONS`, `PORTFOLIO_PER_POSITION`
+- `src/engine/portfolio_simulator.py` - PortfolioSimulator 组合模拟器（Position 数据类，`max_daily_buys` 参数）
+- `config.py` - `INITIAL_CASH`, `COMMISSION`, `PORTFOLIO_INITIAL_CASH`, `PORTFOLIO_MAX_POSITIONS`, `PORTFOLIO_PER_POSITION`, `V4_MULTI_*` 系列参数
 
 ## 4. Attention
 
@@ -102,6 +103,7 @@
 - PortfolioSimulator 的卖出逻辑与 `HuangBaiB1Strategy._check_exit()` 保持同步，含涨幅80%止盈/目标价止盈/止损/巨量阴线清仓/T+N/盈利100%/半仓持股/涨停卖半/中阳卖1/3 九级优先级
 - **止盈放飞后continue缺陷已修复**：`portfolio_simulator.py` 行531~547 为正确参考实现，`continue` 仅在白线之上分支内执行
 - **80%止盈已通用化**：不再限定"完美B1"策略标签，Position 的 `profit_80pct_done` 字段为所有策略共用
+- **`max_daily_buys` 参数**：`__init__` 接受 `max_daily_buys` 参数（默认 1），控制每日最多买入几只候选股票。V4多仓策略传入 2
 - PortfolioSimulator 的 `_find_bar_index()` 使用 `searchsorted` 查找最近的前一个交易日，处理停牌场景
 - 清仓收益使用总回款（含部分卖出累计）vs 总成本计算，非最终卖出价 vs 买入价
 - `market_macd_bullish` 长度必须与 `trading_days` 一致，否则抛出 `ValueError`

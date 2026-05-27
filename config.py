@@ -114,6 +114,16 @@ JZH_MINUTE_EXIT_ENABLED = True       # 启用分钟级止损/涨停检查
 JZH_BRICK_GREEN_EXIT = True          # 持仓中红砖变绿砖则清仓
 JZH_LIMIT_UP_EXIT = True             # 涨停清仓 / 累计盈利≥10%清仓
 
+# V4多仓组合模拟参数（不限仓位数量，每日最多买入N只）
+V4_MULTI_INITIAL_CASH = 1_000_000    # 100万
+V4_MULTI_PER_POSITION = 100_000      # 每只10万
+V4_MULTI_MAX_DAILY_BUYS = 2          # 每日最多买入2只
+
+# 完美B1 V2多仓组合模拟参数（不限仓位数量，每日最多买入N只）
+PB1V2_MULTI_INITIAL_CASH = 1_000_000    # 100万
+PB1V2_MULTI_PER_POSITION = 100_000      # 每只10万
+PB1V2_MULTI_MAX_DAILY_BUYS = 2          # 每日最多买入2只
+
 # B2倍量柱策略参数
 B2_VOL_RATIO = 1.8                    # 倍量柱量比阈值（当天量 > 前一天量 × 此值）
 B2_VOL_AVG_PERIOD = 40                # 均量线周期（MA(VOL, 40)）

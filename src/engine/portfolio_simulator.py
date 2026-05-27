@@ -84,7 +84,7 @@ class PortfolioSimulator:
                  per_position_cash=100_000, commission=0.0003,
                  stock_type="main", t_plus_n=3, log_dir="logs",
                  market_macd_bullish=None, strategy_tag=None,
-                 cli_args=None):
+                 cli_args=None, max_daily_buys=1):
         self._all_signals = all_signals
         self._trading_days = trading_days
         self._cli_args = cli_args
@@ -95,6 +95,7 @@ class PortfolioSimulator:
         self._stock_type = stock_type
         self._t_plus_n = t_plus_n
         self._market_macd_bullish = market_macd_bullish  # np.array[bool] 或 None
+        self._max_daily_buys = max_daily_buys  # 每日最多买入几只
         if strategy_tag:
             self._strategy_tag = strategy_tag
         elif market_macd_bullish is not None:
@@ -149,28 +150,21 @@ class PortfolioSimulator:
     def _compute_wave_high_at(sig, idx):
         """计算买入时的盈亏比高点（前一波黄线之上阳线最高价）
 
-        从idx向前扫描，找到黄线之上最近一波连续阳线区间的最高价。
-        逻辑同 kline_chart.py 的 wave_high 计算。
+        回溯120个交易日，找黄线之上阳线的最高价作为目标价。
         """
         yellow = sig.get("yellow")
         if yellow is None or idx < 0:
             return 0.0
         C = sig["close"]
+        O = sig["open"]
         H = sig["high"]
-        n = min(idx + 1, len(C))
+        lookback = min(idx + 1, 120)
         peak = 0.0
-        in_yellow = False
-        for i in range(n):
+        for i in range(idx - lookback + 1, idx + 1):
             if np.isnan(yellow[i]):
                 continue
-            above_yellow = C[i] >= yellow[i]
-            is_yang = C[i] >= sig["open"][i]
-            if above_yellow and not in_yellow:
-                # 刚站上黄线，重置peak
-                peak = H[i] if is_yang else 0.0
-            elif above_yellow and is_yang:
+            if C[i] >= yellow[i] and C[i] >= O[i]:
                 peak = max(peak, H[i])
-            in_yellow = above_yellow
         return float(peak) if peak > 0 else 0.0
 
     def _log_macd_summary(self):
@@ -280,7 +274,7 @@ class PortfolioSimulator:
                 pass
 
     def _check_entries(self, date):
-        """从观察池中筛选 gc_ok + b1 的候选，买入缩量最优的1只"""
+        """从观察池中筛选 gc_ok + b1 的候选，买入缩量最优的N只"""
         if len(self._positions) >= self._max_positions:
             return
         if self._cash < self._per_position_cash * 0.5:
@@ -343,80 +337,91 @@ class PortfolioSimulator:
         # 其他策略：b2p=None排后，等价于原排序
         candidates.sort(key=lambda x: (x[4] if x[4] is not None else float('inf'),
                                        x[1], -x[2], x[3]))
-        code, score, avg_amt, cs, b2p, idx, sig = candidates[0]
 
-        # B2: T+1开盘买入
-        if "B2" in self._strategy_tag:
-            price = sig["open"][idx]
-        else:
-            price = sig["close"][idx]
-        if price <= 0:
-            return
+        # 取前 max_daily_buys 只候选买入
+        bought_today = 0
+        for code, score, avg_amt, cs, b2p, idx, sig in candidates:
+            if len(self._positions) >= self._max_positions:
+                break
+            if self._cash < self._per_position_cash * 0.5:
+                break
 
-        # 计算可买股数（100股整手）
-        buy_cost = price * (1 + self._commission)
-        shares = int(self._per_position_cash / buy_cost / 100) * 100
-        if shares <= 0:
-            return
-
-        total_cost = shares * price * (1 + self._commission)
-        if total_cost > self._cash:
-            shares = int(self._cash / buy_cost / 100) * 100
-            if shares <= 0:
-                return
-            total_cost = shares * price * (1 + self._commission)
-
-        # 止损价
-        white_val = sig["white"][idx]
-        yellow_val = sig["yellow"][idx]
-        low_val = sig["low"][idx]
-        if "B2" in self._strategy_tag:
-            sl = low_val
-        else:
-            wy_diff = (white_val - yellow_val) / yellow_val
-            if wy_diff < 0.05:
-                sl = yellow_val * 0.99
-            elif price >= white_val:
-                sl = low_val * 0.99
+            # B2: T+1开盘买入
+            if "B2" in self._strategy_tag:
+                price = sig["open"][idx]
             else:
-                sl = yellow_val * 0.99
-        if sl > price:
-            sl = price * 0.95
-        min_sl = round(price * 0.97, 2)
-        if sl > min_sl:
-            sl = min_sl
+                price = sig["close"][idx]
+            if price <= 0:
+                continue
 
-        pos = Position(
-            code=code, buy_date=date, buy_price=price,
-            buy_low=low_val, white_at_buy=white_val,
-            yellow_at_buy=yellow_val, stop_loss=sl, size=shares,
-        )
-        pos.sl_based_on_yellow = False if "B2" in self._strategy_tag else (price < white_val)
-        # 完美B1: 记录买入时的模式类型
-        pt_arr = sig.get("pattern_type")
-        if pt_arr is not None:
-            pos.pattern_type = int(pt_arr[idx])
-        # 盈亏比高点（买入目标价格）
-        pos.wave_high_target = self._compute_wave_high_at(sig, idx)
-        self._positions[code] = pos
-        self._cash -= total_cost
+            # 计算可买股数（100股整手）
+            buy_cost = price * (1 + self._commission)
+            shares = int(self._per_position_cash / buy_cost / 100) * 100
+            if shares <= 0:
+                continue
 
-        # V5: 买入时识别关键K
-        if "V5" in self._strategy_tag:
-            self._identify_key_k_at_buy(pos, idx, sig)
+            total_cost = shares * price * (1 + self._commission)
+            if total_cost > self._cash:
+                shares = int(self._cash / buy_cost / 100) * 100
+                if shares <= 0:
+                    continue
+                total_cost = shares * price * (1 + self._commission)
 
-        # 大盘MACD状态
-        macd_tag = ""
-        if self._market_macd_bullish is not None:
-            td_idx = self._td_index.get(date)
-            if td_idx is not None:
-                macd_tag = f"  大盘={'多头' if self._market_macd_bullish[td_idx] else '空头'}"
+            # 止损价
+            white_val = sig["white"][idx]
+            yellow_val = sig["yellow"][idx]
+            low_val = sig["low"][idx]
+            if "B2" in self._strategy_tag:
+                sl = low_val
+            else:
+                wy_diff = (white_val - yellow_val) / yellow_val
+                if wy_diff < 0.05:
+                    sl = yellow_val * 0.99
+                elif price >= white_val:
+                    sl = low_val * 0.99
+                else:
+                    sl = yellow_val * 0.99
+            if sl > price:
+                sl = price * 0.95
+            min_sl = round(price * 0.97, 2)
+            if sl > min_sl:
+                sl = min_sl
 
-        self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 买入 {code}  "
-                  f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
-                  f"缩量={score:.3f}{macd_tag}  "
-                  f"持仓={len(self._positions)}/{self._max_positions}  "
-                  f"现金={self._cash:,.0f}")
+            pos = Position(
+                code=code, buy_date=date, buy_price=price,
+                buy_low=low_val, white_at_buy=white_val,
+                yellow_at_buy=yellow_val, stop_loss=sl, size=shares,
+            )
+            pos.sl_based_on_yellow = False if "B2" in self._strategy_tag else (price < white_val)
+            # 完美B1: 记录买入时的模式类型
+            pt_arr = sig.get("pattern_type")
+            if pt_arr is not None:
+                pos.pattern_type = int(pt_arr[idx])
+            # 盈亏比高点（买入目标价格）
+            pos.wave_high_target = self._compute_wave_high_at(sig, idx)
+            self._positions[code] = pos
+            self._cash -= total_cost
+
+            # V5: 买入时识别关键K
+            if "V5" in self._strategy_tag:
+                self._identify_key_k_at_buy(pos, idx, sig)
+
+            # 大盘MACD状态
+            macd_tag = ""
+            if self._market_macd_bullish is not None:
+                td_idx = self._td_index.get(date)
+                if td_idx is not None:
+                    macd_tag = f"  大盘={'多头' if self._market_macd_bullish[td_idx] else '空头'}"
+
+            self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 买入 {code}  "
+                      f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
+                      f"缩量={score:.3f}{macd_tag}  "
+                      f"持仓={len(self._positions)}/{self._max_positions}  "
+                      f"现金={self._cash:,.0f}")
+
+            bought_today += 1
+            if bought_today >= self._max_daily_buys:
+                break
 
     def _check_exits(self, date):
         """检查所有持仓的卖出条件"""

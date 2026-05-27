@@ -446,17 +446,11 @@ class HuangBaiB1V4Strategy(BaseStrategy):
 
         # 前一波高点（C >= 黄线时跟踪阳线波峰，阴线跳过）
         _wave_high = np.empty(len(C))
-        _peak = H[0] if C[0] >= O[0] else 0.0
-        _prev_in = C[0] >= self._yellow[0]
+        _peak = 0.0
         for _i in range(len(C)):
-            _in = C[_i] >= self._yellow[_i]
-            _is_yang = C[_i] >= O[_i]
-            if _in and not _prev_in:
-                _peak = H[_i] if _is_yang else 0.0
-            elif _in and _is_yang:
+            if C[_i] >= self._yellow[_i] and C[_i] >= O[_i]:
                 _peak = max(_peak, H[_i])
             _wave_high[_i] = _peak
-            _prev_in = _in
 
         # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
         _rr_risk = C - self._yellow * 0.99
@@ -1038,17 +1032,11 @@ def _compute_signals(C, H, L, O, V, dates, params):
 
     # 前一波高点（C >= 黄线时跟踪阳线波峰，阴线跳过）
     _wave_high = np.empty(n)
-    _peak = H[0] if C[0] >= O[0] else 0.0
-    _prev_in = C[0] >= yellow[0]
+    _peak = 0.0
     for _i in range(n):
-        _in = C[_i] >= yellow[_i]
-        _is_yang = C[_i] >= O[_i]
-        if _in and not _prev_in:
-            _peak = H[_i] if _is_yang else 0.0
-        elif _in and _is_yang:
+        if C[_i] >= yellow[_i] and C[_i] >= O[_i]:
             _peak = max(_peak, H[_i])
         _wave_high[_i] = _peak
-        _prev_in = _in
 
     # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
     if b1:
@@ -1376,17 +1364,11 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
 
     # 前一波高点（C >= 黄线时跟踪阳线波峰，阴线跳过）
     _wave_high = np.empty(len(C))
-    _peak = H[0] if C[0] >= O[0] else 0.0
-    _prev_in = C[0] >= yellow[0]
+    _peak = 0.0
     for _i in range(len(C)):
-        _in = C[_i] >= yellow[_i]
-        _is_yang = C[_i] >= O[_i]
-        if _in and not _prev_in:
-            _peak = H[_i] if _is_yang else 0.0
-        elif _in and _is_yang:
+        if C[_i] >= yellow[_i] and C[_i] >= O[_i]:
             _peak = max(_peak, H[_i])
         _wave_high[_i] = _peak
-        _prev_in = _in
 
     # 盈亏比过滤：奖励空间 >= 3倍风险空间，或无风险（黄线价以下）
     _rr_risk = C - yellow * 0.99

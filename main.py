@@ -60,6 +60,12 @@ from config import (
     NXB1_MAX_POSITIONS,
     NXB1_PER_POSITION,
     NXB1_T_PLUS_N,
+    V4_MULTI_INITIAL_CASH,
+    V4_MULTI_PER_POSITION,
+    V4_MULTI_MAX_DAILY_BUYS,
+    PB1V2_MULTI_INITIAL_CASH,
+    PB1V2_MULTI_PER_POSITION,
+    PB1V2_MULTI_MAX_DAILY_BUYS,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
@@ -68,6 +74,7 @@ from src.strategies.huangbai_b1_strategy import HuangBaiB1Strategy, scan_all
 from src.strategies.huangbai_b1_v2_strategy import HuangBaiB1V2Strategy, scan_all as scan_all_v2
 from src.strategies.huangbai_b1_v3_strategy import HuangBaiB1V3Strategy, scan_all as scan_all_v3
 from src.strategies.huangbai_b1_v4_strategy import HuangBaiB1V4Strategy, scan_all as scan_all_v4
+from src.strategies.huangbai_b1_v4_multi_strategy import scan_all as scan_all_v4_multi
 from src.strategies.huangbai_b1_v5_strategy import HuangBaiB1V5Strategy, scan_all as scan_all_v5
 from src.strategies.dongneng_zhuan_strategy import scan_all as scan_all_dnzh
 from src.strategies.nxing_zhuan_strategy import scan_all as scan_all_nxzh
@@ -76,6 +83,7 @@ from src.strategies.huangbai_b2_strategy import scan_all as scan_all_b2
 from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
 from src.strategies.perfect_b1_strategy import scan_all as scan_all_pb1
 from src.strategies.perfect_b1_v2_strategy import scan_all as scan_all_pb1v2
+from src.strategies.perfect_b1_v2_multi_strategy import scan_all as scan_all_pb1v2_multi
 from src.strategies.nxing_b1_scan_strategy import (
     scan_all_nx_b1,
     preload_all_signals as preload_nx_b1,
@@ -88,6 +96,7 @@ STRATEGIES = {
     "huangbai_v2": HuangBaiB1V2Strategy,
     "huangbai_v3": HuangBaiB1V3Strategy,
     "huangbai_v4": HuangBaiB1V4Strategy,
+    "huangbai_v4_multi": None,  # V4多仓：不限仓位数量，每日最多买入2只
     "huangbai_v5": HuangBaiB1V5Strategy,
     "dongneng_zhuan": None,  # 仅支持组合级模拟，不支持单股回测
     "nxing_zhuan": None,     # 仅支持组合级模拟，不支持单股回测
@@ -96,6 +105,7 @@ STRATEGIES = {
     "huangbai_b2_v2": None,  # B2_V2倍量柱：30日B1频次过滤，仅支持组合级模拟+扫描
     "perfect_b1": None,     # 完美B1：V4 B1+5种模式质量过滤，仅支持组合级模拟+扫描
     "perfect_b1_v2": None,  # 完美B1 V2：V4 B1+11种个股模式质量过滤，仅支持组合级模拟+扫描
+    "perfect_b1_v2_multi": None,  # 完美B1 V2多仓：不限仓位数量，每日最多买入2只
     "nxing_b1": None,       # N型B1选股：组合级模拟+扫描，不支持单股回测
     "jinchai_b1": None,     # 金叉B1选股：纯扫描+图表，不支持回测
 }
@@ -107,7 +117,7 @@ def parse_args():
     parser.add_argument("--start", default=DEFAULT_START_DATE, help="起始日期")
     parser.add_argument("--end", default=DEFAULT_END_DATE, help="结束日期")
     parser.add_argument("--cash", type=float, default=INITIAL_CASH, help="初始资金")
-    parser.add_argument("--strategy", choices=STRATEGIES.keys(), default="huangbai", help="策略选择")
+    parser.add_argument("--strategy", choices=list(STRATEGIES.keys()), default="huangbai", help="策略选择")
     parser.add_argument("--stock-type", choices=["main", "tech"], default=STOCK_TYPE, help="板块类型")
     parser.add_argument("--scan", action="store_true", help="强制全市场扫描（忽略 --symbol）")
     parser.add_argument("--scan-only", action="store_true", help="仅扫描选股，不回测")
@@ -488,6 +498,67 @@ def main():
         report = sim.report()
         PortfolioSimulator.print_report(report, log_file=sim._log_file,
                                         strategy_tag="[完美B1V2]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        return
+
+    # ---- 完美B1 V2多仓策略 ----
+    if args.strategy == "perfect_b1_v2_multi":
+        if args.scan or args.scan_only:
+            print("=" * 60)
+            print("  完美B1 V2多仓 全市场选股扫描")
+            print("  条件: V4 B1 + 11种个股模式质量过滤 + 大盘MACD多头")
+            print("=" * 60)
+            results, market_macd_ok = scan_all_pb1v2_multi(stock_type=args.stock_type)
+            if not market_macd_ok and not results:
+                print("\n大盘MACD空头，无符合条件的股票。")
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.perfect_b1_v2_multi_strategy import preload_all_signals as preload_pb1v2_multi
+
+        print("=" * 60)
+        print("  完美B1 V2多仓: V4 B1 + 11种模式质量过滤（每日最多买入2只）")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 60)
+        all_signals, trading_days, market_macd_bullish = preload_pb1v2_multi(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 60}")
+        print(f"  阶段2: 完美B1 V2多仓组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PB1V2_MULTI_INITIAL_CASH:,.0f}  "
+              f"不限持仓数  "
+              f"每只 {PB1V2_MULTI_PER_POSITION:,.0f}  "
+              f"每日最多买入 {PB1V2_MULTI_MAX_DAILY_BUYS} 只")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 60}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PB1V2_MULTI_INITIAL_CASH,
+            max_positions=999,
+            per_position_cash=PB1V2_MULTI_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[完美B1V2多仓]",
+            cli_args=args,
+            max_daily_buys=PB1V2_MULTI_MAX_DAILY_BUYS)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[完美B1V2多仓]")
 
         if args.chart:
             from src.charting import generate_charts
@@ -1010,6 +1081,78 @@ def main():
         print(f"  区间: {args.start} ~ {args.end}")
         print(f"{'=' * 55}")
         _run_backtest(codes, args)
+        return
+
+    # ---- V4多仓策略 ----
+    if args.strategy == "huangbai_v4_multi":
+        if args.scan or args.scan_only:
+            print("=" * 55)
+            print("  V4多仓: 全市场选股扫描（无金叉条件 + 大盘MACD过滤）")
+            print("=" * 55)
+            results, market_macd_ok = scan_all_v4_multi(stock_type=args.stock_type)
+
+            if args.scan_only:
+                return
+
+            if not results or not market_macd_ok:
+                print("\n无符合条件的股票或大盘MACD空头，回测终止。")
+                return
+
+            codes = [r["code"] for r in results]
+            print(f"\n{'=' * 55}")
+            print(f"  阶段2: 对 {len(codes)} 只选股结果执行回测")
+            print(f"  区间: {args.start} ~ {args.end}")
+            print(f"{'=' * 55}")
+            _run_backtest(codes, args)
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.huangbai_b1_v4_multi_strategy import preload_all_signals as preload_v4_multi
+
+        print("=" * 55)
+        print("  V4多仓: 不限持仓数量 + 大盘MACD + B1（每日最多买入2只）")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days, market_macd_bullish = preload_v4_multi(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: V4多仓组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {V4_MULTI_INITIAL_CASH:,.0f}  "
+              f"不限持仓数  "
+              f"每只 {V4_MULTI_PER_POSITION:,.0f}  "
+              f"每日最多买入 {V4_MULTI_MAX_DAILY_BUYS} 只")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=V4_MULTI_INITIAL_CASH,
+            max_positions=999,
+            per_position_cash=V4_MULTI_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[B1V4多仓]",
+            cli_args=args,
+            max_daily_buys=V4_MULTI_MAX_DAILY_BUYS)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[B1V4多仓]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         return
 
     # ---- 指定股票回测 ----

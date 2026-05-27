@@ -108,25 +108,23 @@ class NxingB1Simulator:
 
     @staticmethod
     def _compute_wave_high_at(sig, idx):
-        """计算买入时的盈亏比高点（前一波黄线之上阳线最高价）"""
+        """计算买入时的盈亏比高点（前一波黄线之上阳线最高价）
+
+        回溯120个交易日，找黄线之上阳线的最高价作为目标价。
+        """
         yellow = sig.get("yellow")
         if yellow is None or idx < 0:
             return 0.0
         C = sig["close"]
+        O = sig["open"]
         H = sig["high"]
-        n = min(idx + 1, len(C))
+        lookback = min(idx + 1, 120)
         peak = 0.0
-        in_yellow = False
-        for i in range(n):
+        for i in range(idx - lookback + 1, idx + 1):
             if np.isnan(yellow[i]):
                 continue
-            above_yellow = C[i] >= yellow[i]
-            is_yang = C[i] >= sig["open"][i]
-            if above_yellow and not in_yellow:
-                peak = H[i] if is_yang else 0.0
-            elif above_yellow and is_yang:
+            if C[i] >= yellow[i] and C[i] >= O[i]:
                 peak = max(peak, H[i])
-            in_yellow = above_yellow
         return float(peak) if peak > 0 else 0.0
 
     def run(self):

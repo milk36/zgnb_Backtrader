@@ -15,12 +15,15 @@
 | `huangbai_v2` | 黄白线 B1 + 大盘MACD | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `huangbai_v3` | 黄白线 B1 V3 | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `huangbai_v4` | 黄白线 B1 V4（无金叉+动能过滤） | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
+| `huangbai_v4_multi` | 黄白线 B1 V4 多仓（不限仓位+每日买2只） | 组合模拟 / 扫描+回测 / 仅扫描 |
 | `huangbai_v5` | 黄白线 B1 V5（战法退出） | 组合模拟 / 扫描+回测 / 仅扫描 / 单股回测 |
 | `dongneng_zhuan` | 动能+砖 | 组合模拟（默认）/ 仅扫描 |
 | `nxing_zhuan` | N型+砖 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2` | B2 倍量柱 | 组合模拟（默认）/ 仅扫描 |
 | `huangbai_b2_v2` | B2 V2 倍量柱（30日B1频次） | 组合模拟（默认）/ 仅扫描 |
 | `perfect_b1` | 完美B1（V4+5种模式过滤） | 组合模拟（默认）/ 仅扫描 |
+| `perfect_b1_v2` | 完美B1 V2（V4+11种个股模式过滤） | 组合模拟（默认）/ 仅扫描 |
+| `perfect_b1_v2_multi` | 完美B1 V2多仓（不限仓位+每日买2只） | 组合模拟（默认）/ 仅扫描 |
 | `nxing_b1` | N型B1选股 | 组合模拟（默认）/ 仅扫描 |
 | `jinchai_b1` | 金叉B1选股 | 仅扫描（纯选股+K线图） |
 
@@ -95,7 +98,7 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `perfect_b1` / `nxing_b1` / `jinchai_b1` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v4_multi` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `perfect_b1` / `perfect_b1_v2` / `perfect_b1_v2_multi` / `nxing_b1` / `jinchai_b1` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -186,6 +189,19 @@ python main.py --strategy nxing_zhuan --scan-only
 python main.py --strategy nxing_zhuan --chart
 ```
 
+#### V4 多仓策略
+
+```bash
+# 组合级模拟（不限仓位，每日最多买入2只）
+python main.py --strategy huangbai_v4_multi --portfolio --chart
+
+# 自定义回测区间
+python main.py --strategy huangbai_v4_multi --portfolio --start 2024-01-01 --end 2025-12-31
+
+# 全市场扫描选股
+python main.py --strategy huangbai_v4_multi --scan-only
+```
+
 #### B2 倍量柱策略
 
 ```bash
@@ -216,6 +232,19 @@ python main.py --strategy perfect_b1 --scan-only
 
 # 组合级模拟 + K线图
 python main.py --strategy perfect_b1 --chart
+```
+
+#### 完美B1 V2多仓策略
+
+```bash
+# 组合级模拟（不限仓位，每日最多买入2只）
+python main.py --strategy perfect_b1_v2_multi --portfolio --chart
+
+# 自定义回测区间
+python main.py --strategy perfect_b1_v2_multi --portfolio --start 2024-01-01 --end 2025-12-31
+
+# 全市场扫描选股
+python main.py --strategy perfect_b1_v2_multi --scan-only
 ```
 
 #### N型B1选股
@@ -292,6 +321,15 @@ python main.py --strategy kdj --symbol 600036
 - **退出参数**：`NXZH_T_PLUS_N=2`（不拉升天数）、`NXZH_MAX_HOLD_DAYS=6`（盈利后最大持仓）、`NXZH_PROFIT_PCT=5.0`（脱离成本区%），均可在 `config.py` 调整
 - **入场模式**：`NXZH_MINUTE_ENTRY_ENABLED=False`，T+1日线开盘买入（无分钟确认），与动能砖的核心区别
 
+#### V4 多仓参数
+
+- **不支持 `--symbol`**：仅支持组合模拟或扫描模式
+- **`--stock-type`**：同黄白线系列，影响振幅阈值、中阳判断、涨停板计算
+- **资金/仓位**：`V4_MULTI_INITIAL_CASH=100万`、不限持仓数量（`max_positions=999`）、`V4_MULTI_PER_POSITION=10万`，来自 `config.py`
+- **每日买入上限**：`V4_MULTI_MAX_DAILY_BUYS=2`，PortfolioSimulator 的 `max_daily_buys` 参数
+- **退出逻辑**：与 V4 完全相同（六级退出 + 大盘转空卖1/2 + 盈利跌破黄线清仓）
+- **大盘MACD过滤**：同V4，空头日只卖不买
+
 #### B2 倍量柱参数
 
 - **无需 `--portfolio`**：默认即组合级模拟
@@ -310,6 +348,15 @@ python main.py --strategy kdj --symbol 600036
 - **退出逻辑**：复用 PortfolioSimulator 标准六级退出（同V4）
 - **大盘MACD过滤**：同V2，空头日只卖不买
 - **核心差异**：在V4 B1基础上叠加5种模式质量过滤（典型单波/白线不死叉/多波N型/跌破反转/大牛市），过滤掉短期B1
+
+#### 完美B1 V2多仓参数
+
+- **不支持 `--symbol`**：仅支持组合模拟或扫描模式
+- **`--stock-type`**：同黄白线系列，影响振幅阈值、中阳判断、涨停板计算
+- **资金/仓位**：`PB1V2_MULTI_INITIAL_CASH=100万`、不限持仓数量（`max_positions=999`）、`PB1V2_MULTI_PER_POSITION=10万`，来自 `config.py`
+- **每日买入上限**：`PB1V2_MULTI_MAX_DAILY_BUYS=2`，PortfolioSimulator 的 `max_daily_buys` 参数
+- **退出逻辑**：与完美B1 V2完全相同（标准六级退出）
+- **大盘MACD过滤**：同V2，空头日只卖不买
 
 #### N型B1参数
 
@@ -339,3 +386,5 @@ python main.py --strategy kdj --symbol 600036
 - `nxing_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `jinzhuan` 同样不支持单股回测（STRATEGIES 字典中值为 None）
 - `jinchai_b1` 同样不支持单股回测（STRATEGIES 字典中值为 None，仅纯扫描+图表）
+- `huangbai_v4_multi` 同样不支持单股回测（STRATEGIES 字典中值为 None），需配合 `--portfolio` 使用
+- `perfect_b1_v2_multi` 同样不支持单股回测（STRATEGIES 字典中值为 None），需配合 `--portfolio` 使用

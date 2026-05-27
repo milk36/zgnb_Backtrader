@@ -265,18 +265,13 @@ def _compute_all_bar_b1_and_filters(C, H, L, O, V, dates, params):
     b1 = (b_oversold_turn | b_oversold_shrink | b_raw
           | b_oversold_super | b_pb_white | b_pb_super | b_pb_yellow)
 
-    # 前一波高点（价格>=黄线的最近一波上涨峰值）
+    # 前一波高点（价格>=黄线的历史最高点，不因穿越重置）
     _wave_high = np.empty(n)
-    _peak = H[0]
-    _prev_in = C[0] >= yellow[0]
+    _peak = 0.0
     for _i in range(n):
-        _in = C[_i] >= yellow[_i]
-        if _in and not _prev_in:
-            _peak = H[_i]
-        elif _in:
+        if C[_i] >= yellow[_i]:
             _peak = max(_peak, H[_i])
         _wave_high[_i] = _peak
-        _prev_in = _in
 
     # 盈亏比过滤：reward(前一波高点 - 买入价) >= 3 * risk(买入价 - 止损价)
     _rr_risk = C - yellow * 0.99
