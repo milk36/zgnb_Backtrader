@@ -144,3 +144,16 @@ LOG_DIR = "logs"
 # 绘图
 PLOT_ENABLED = True
 CHART_OUTPUT_DIR = "charts"
+
+# ZStock B1 策略参数（StockTradebyZ 4-Filter 模式）
+ZSTOCK_KDJ_J_THRESHOLD = 15.0          # J 值绝对阈值
+ZSTOCK_KDJ_J_Q_THRESHOLD = 0.10        # J 值 expanding 分位数
+ZSTOCK_ZX_EMA_PERIOD = 10              # 白线 EMA 周期
+ZSTOCK_ZX_MA_PERIODS = (14, 28, 57, 114)  # 黄线 MA 周期
+ZSTOCK_WEEKLY_MA_PERIODS = (20, 60, 120)  # 周线多头 MA 周期
+ZSTOCK_MAXVOL_LOOKBACK = 20            # 最大量回看天数
+ZSTOCK_INITIAL_CASH = 1_000_000        # 100万
+ZSTOCK_MAX_POSITIONS = 10              # 最多10只
+ZSTOCK_PER_POSITION = 100_000          # 每只10万
+ZSTOCK_AI_SCORE_PASS = 4.0             # PASS 阈值
+ZSTOCK_AI_SCORE_WATCH = 3.2            # WATCH 阈值

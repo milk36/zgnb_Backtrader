@@ -26,6 +26,7 @@
 - [策略层：N型+砖策略](feature/strategy-nxing-zhuan.md): 动能砖的变体策略，仅使用金砖共振信号选股（跳过动能预过滤和筹码密集过滤），外加流通市值>50亿过滤。巨量阴线过滤通过动能砖信号传递。T+1日线开盘买入（无分钟确认），复用 DongnengZhuanSimulator 模拟器。
 - [策略层：N型B1选股策略](feature/strategy-nxing-b1-scan.md): N型B1策略支持选股扫描和组合级模拟两种模式。选股扫描：60日内>=2次B1信号（间隔>=30天）且价格逐次抬高的N型结构筛选，统计T+3涨幅胜率。组合模拟：预加载全市场N型B1信号，100万/10只/每只10万，T+1开盘买入，六级退出。复用V4的B1七子条件、vol_expand_ok过滤链和突然放巨量阴线过滤。
 - [策略层：金叉B1选股策略](feature/strategy-jinchai-b1-scan.md): 纯选股扫描策略，筛选白线刚刚金叉黄线后出现B1信号的股票。流通市值>50亿，复用N型B1的B1七子条件、vol_expand_ok过滤链、突然放巨量阴线过滤、8项假案例排除。统计T+5涨幅>=10%的概率，支持日期区间筛选，自动生成K线图。不支持回测和组合模拟。
+- [策略层：ZStock B1选股策略 + AI评分 + 管道脚本](feature/strategy-zstock-b1.md): 参考 StockTradebyZ 的 4-Filter B1 选股逻辑（KDJ低位+知行线+周线多头+最大量非阴），配套 QuantitativeScorer 四维评分模块（趋势/价格/量价/异动）和 run_pipeline.py 三阶段管道脚本（选股→AI评分→回测）。理解 ZStock B1 策略设计、AI评分体系或管道脚本使用时参考。
 
 ## SOP Documents
 

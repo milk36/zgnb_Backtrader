@@ -66,6 +66,9 @@ from config import (
     PB1V2_MULTI_INITIAL_CASH,
     PB1V2_MULTI_PER_POSITION,
     PB1V2_MULTI_MAX_DAILY_BUYS,
+    ZSTOCK_INITIAL_CASH,
+    ZSTOCK_MAX_POSITIONS,
+    ZSTOCK_PER_POSITION,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
@@ -89,6 +92,10 @@ from src.strategies.nxing_b1_scan_strategy import (
     preload_all_signals as preload_nx_b1,
 )
 from src.strategies.jinchai_b1_scan_strategy import scan_all_jc_b1
+from src.strategies.zstock_b1_strategy import (
+    scan_all as scan_all_zstock_b1,
+    preload_all_signals as preload_zstock_b1,
+)
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -108,6 +115,7 @@ STRATEGIES = {
     "perfect_b1_v2_multi": None,  # 完美B1 V2多仓：不限仓位数量，每日最多买入2只
     "nxing_b1": None,       # N型B1选股：组合级模拟+扫描，不支持单股回测
     "jinchai_b1": None,     # 金叉B1选股：纯扫描+图表，不支持回测
+    "zstock_b1": None,     # ZStock B1：StockTradebyZ 4-Filter选股+组合级模拟
 }
 
 
@@ -628,6 +636,62 @@ def main():
         print("=" * 55)
         scan_all_jc_b1(stock_type=args.stock_type,
                        start_date=args.start, end_date=args.end)
+        return
+
+    # ---- ZStock B1 选股策略 ----
+    if args.strategy == "zstock_b1":
+        if args.scan or args.scan_only:
+            print("=" * 55)
+            print("  ZStock B1 全市场选股扫描")
+            print("  条件: KDJ低位 + 知行线(C>黄线&白>黄) + 周线多头 + 最大量非阴")
+            print("=" * 55)
+            scan_all_zstock_b1(stock_type=args.stock_type)
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+
+        print("=" * 55)
+        print("  ZStock B1: 4-Filter 选股 + 组合级模拟")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days, market_macd_bullish = preload_zstock_b1(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: ZStock B1组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {ZSTOCK_INITIAL_CASH:,.0f}  "
+              f"最多 {ZSTOCK_MAX_POSITIONS} 只  "
+              f"每只 {ZSTOCK_PER_POSITION:,.0f}")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=ZSTOCK_INITIAL_CASH,
+            max_positions=ZSTOCK_MAX_POSITIONS,
+            per_position_cash=ZSTOCK_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[ZStockB1]",
+            cli_args=args)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[ZStockB1]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="volume")
         return
 
     # ---- B2 倍量柱策略 ----

@@ -6,10 +6,13 @@
 
 import os
 import time
+import logging
 import numpy as np
 import pandas as pd
 
 from config import QFQ_CACHE_ENABLED, QFQ_CACHE_DIR
+
+logger = logging.getLogger(__name__)
 
 # 内存缓存：code -> pd.Series(qfq_close, index=DatetimeIndex)
 _memory_cache: dict[str, pd.Series] = {}
@@ -60,7 +63,7 @@ def _fetch_qfq_from_akshare(code: str) -> pd.Series | None:
         closes = qfq_df.iloc[:, 3].astype(float)
         return pd.Series(closes.values, index=dates, name=code)
     except Exception as e:
-        print(f"  [QFQ] 获取 {code} 失败: {e}")
+        logger.debug("获取 %s 前复权数据失败: %s", code, e)
         return None
 
 
