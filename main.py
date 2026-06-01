@@ -66,9 +66,15 @@ from config import (
     PB1V2_MULTI_INITIAL_CASH,
     PB1V2_MULTI_PER_POSITION,
     PB1V2_MULTI_MAX_DAILY_BUYS,
+    PB1V2_BUYALL_INITIAL_CASH,
+    PB1V2_BUYALL_PER_POSITION,
+    PB1V2_BUYALL_MAX_DAILY_BUYS,
     ZSTOCK_INITIAL_CASH,
     ZSTOCK_MAX_POSITIONS,
     ZSTOCK_PER_POSITION,
+    ZSTOCK_BUYALL_INITIAL_CASH,
+    ZSTOCK_BUYALL_PER_POSITION,
+    ZSTOCK_BUYALL_MAX_DAILY_BUYS,
 )
 from src.data.tdx_feed import TdxDataFeed
 from src.engine.backtester import Backtester
@@ -87,6 +93,7 @@ from src.strategies.huangbai_b2_v2_strategy import scan_all as scan_all_b2v2
 from src.strategies.perfect_b1_strategy import scan_all as scan_all_pb1
 from src.strategies.perfect_b1_v2_strategy import scan_all as scan_all_pb1v2
 from src.strategies.perfect_b1_v2_multi_strategy import scan_all as scan_all_pb1v2_multi
+from src.strategies.perfect_b1_v2_buyall_strategy import scan_all as scan_all_pb1v2_buyall
 from src.strategies.nxing_b1_scan_strategy import (
     scan_all_nx_b1,
     preload_all_signals as preload_nx_b1,
@@ -95,6 +102,9 @@ from src.strategies.jinchai_b1_scan_strategy import scan_all_jc_b1
 from src.strategies.zstock_b1_strategy import (
     scan_all as scan_all_zstock_b1,
     preload_all_signals as preload_zstock_b1,
+)
+from src.strategies.zstock_b1_buyall_strategy import (
+    scan_all as scan_all_zstock_b1_buyall,
 )
 
 STRATEGIES = {
@@ -113,9 +123,11 @@ STRATEGIES = {
     "perfect_b1": None,     # 完美B1：V4 B1+5种模式质量过滤，仅支持组合级模拟+扫描
     "perfect_b1_v2": None,  # 完美B1 V2：V4 B1+11种个股模式质量过滤，仅支持组合级模拟+扫描
     "perfect_b1_v2_multi": None,  # 完美B1 V2多仓：不限仓位数量，每日最多买入2只
+    "perfect_b1_v2_buyall": None,  # 完美B1 V2全仓：不限资金不限持仓，买入所有符合条件的股票
     "nxing_b1": None,       # N型B1选股：组合级模拟+扫描，不支持单股回测
     "jinchai_b1": None,     # 金叉B1选股：纯扫描+图表，不支持回测
     "zstock_b1": None,     # ZStock B1：StockTradebyZ 4-Filter选股+组合级模拟
+    "zstock_b1_buyall": None,  # ZStock B1全仓：不限资金不限持仓，买入所有候选
 }
 
 
@@ -132,9 +144,24 @@ def parse_args():
     parser.add_argument("--no-plot", action="store_true", help="禁用绘图")
     parser.add_argument("--portfolio", action="store_true", help="组合级模拟（正确的时间序列模拟）")
     parser.add_argument("--chart", action="store_true", help="生成交易K线图（保存到charts/目录）")
+    parser.add_argument("--eval", action="store_true", help="生成策略评测HTML报告（5维度打分）")
     parser.add_argument("--update-qfq-cache", action="store_true", help="批量更新前复权缓存（需要网络）")
     parser.add_argument("--update-qfq-codes", nargs="+", default=None, help="指定更新前复权缓存的股票代码")
     return parser.parse_args()
+
+
+def _run_eval(report, strategy_tag, args):
+    """生成策略评测 HTML 报告（--eval 时调用）"""
+    from datetime import datetime
+    from src.evaluator import evaluate_report, generate_eval_html
+    eval_result = evaluate_report(
+        report, strategy_tag=strategy_tag,
+        start_date=args.start, end_date=args.end)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tag_safe = strategy_tag.strip("[]").replace(" ", "_")
+    out_html = os.path.join(LOG_DIR, f"eval_{tag_safe}_{ts}.html")
+    generate_eval_html(eval_result, output_path=out_html)
+    print(f"  评测报告已保存: {out_html}")
 
 
 def _run_backtest(symbols, args, strategy_cls=None):
@@ -263,6 +290,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[DNZH]", args)
         return
 
     # ---- N型砖策略 ----
@@ -330,6 +359,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[N型砖]", args)
         return
 
     # ---- 金砖策略 ----
@@ -396,6 +427,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[金砖]", args)
         return
 
     # ---- 完美B1策略 ----
@@ -451,6 +484,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[PB1]", args)
         return
 
     # ---- 完美B1 V2策略 ----
@@ -510,6 +545,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[PB1V2]", args)
         return
 
     # ---- 完美B1 V2多仓策略 ----
@@ -571,6 +608,71 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[PB1V2多仓]", args)
+        return
+
+    # ---- 完美B1 V2全仓策略 ----
+    if args.strategy == "perfect_b1_v2_buyall":
+        if args.scan or args.scan_only:
+            print("=" * 60)
+            print("  完美B1 V2全仓 全市场选股扫描")
+            print("  条件: V4 B1 + 11种个股模式质量过滤 + 大盘MACD多头")
+            print("=" * 60)
+            results, market_macd_ok = scan_all_pb1v2_buyall(stock_type=args.stock_type)
+            if not market_macd_ok and not results:
+                print("\n大盘MACD空头，无符合条件的股票。")
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.perfect_b1_v2_buyall_strategy import preload_all_signals as preload_pb1v2_buyall
+
+        print("=" * 60)
+        print("  完美B1 V2全仓: V4 B1 + 11种模式质量过滤（买入所有候选）")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 60)
+        all_signals, trading_days, market_macd_bullish = preload_pb1v2_buyall(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 60}")
+        print(f"  阶段2: 完美B1 V2全仓组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PB1V2_BUYALL_INITIAL_CASH:,.0f}  "
+              f"不限持仓数  "
+              f"每只 {PB1V2_BUYALL_PER_POSITION:,.0f}  "
+              f"买入所有候选")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 60}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PB1V2_BUYALL_INITIAL_CASH,
+            max_positions=9999,
+            per_position_cash=PB1V2_BUYALL_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[完美B1V2全仓]",
+            cli_args=args,
+            max_daily_buys=PB1V2_BUYALL_MAX_DAILY_BUYS)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[完美B1V2全仓]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[PB1V2全仓]", args)
         return
 
     # ---- N型B1选股策略 ----
@@ -625,6 +727,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals)
+        if args.eval:
+            _run_eval(report, "[N型B1]", args)
         return
 
     # ---- 金叉B1选股策略 ----
@@ -692,6 +796,71 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="volume")
+        if args.eval:
+            _run_eval(report, "[ZStockB1]", args)
+        return
+
+    # ---- ZStock B1 全仓策略 ----
+    if args.strategy == "zstock_b1_buyall":
+        if args.scan or args.scan_only:
+            print("=" * 60)
+            print("  ZStock B1全仓 全市场选股扫描")
+            print("  条件: KDJ低位 + 知行线(C>黄线&白>黄) + 周线多头 + 最大量非阴")
+            print("=" * 60)
+            scan_all_zstock_b1_buyall(stock_type=args.stock_type)
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+        from src.strategies.zstock_b1_buyall_strategy import (
+            preload_all_signals as preload_zstock_b1_buyall,
+        )
+
+        print("=" * 60)
+        print("  ZStock B1全仓: 4-Filter 选股（买入所有候选）")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 60)
+        all_signals, trading_days, market_macd_bullish = preload_zstock_b1_buyall(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        print(f"\n{'=' * 60}")
+        print(f"  阶段2: ZStock B1全仓组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {ZSTOCK_BUYALL_INITIAL_CASH:,.0f}  "
+              f"不限持仓数  "
+              f"每只 {ZSTOCK_BUYALL_PER_POSITION:,.0f}  "
+              f"买入所有候选")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 60}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=ZSTOCK_BUYALL_INITIAL_CASH,
+            max_positions=9999,
+            per_position_cash=ZSTOCK_BUYALL_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[ZStockB1全仓]",
+            cli_args=args,
+            max_daily_buys=ZSTOCK_BUYALL_MAX_DAILY_BUYS)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[ZStockB1全仓]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="volume")
+        if args.eval:
+            _run_eval(report, "[ZStockB1全仓]", args)
         return
 
     # ---- B2 倍量柱策略 ----
@@ -749,6 +918,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B2]", args)
         return
 
     # ---- B2_V2 倍量柱策略（30日B1频次过滤） ----
@@ -804,6 +975,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B2V2]", args)
         return
 
     # ---- huangbai 策略：组合级模拟 ----
@@ -847,6 +1020,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1]", args)
         return
 
     # ---- huangbai_v2 策略：组合级模拟（含大盘MACD过滤） ----
@@ -894,6 +1069,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1V2]", args)
         return
     if strategy_cls == HuangBaiB1V3Strategy and args.portfolio:
         from src.engine.portfolio_simulator import PortfolioSimulator
@@ -940,6 +1117,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1V3]", args)
         return
 
     if strategy_cls == HuangBaiB1V4Strategy and args.portfolio:
@@ -987,6 +1166,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1V4]", args)
         return
 
     # ---- huangbai_v5 组合级模拟 ----
@@ -1035,6 +1216,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1V5]", args)
         return
 
     # ---- huangbai 策略：全市场扫描 + 回测 ----
@@ -1217,6 +1400,8 @@ def main():
         if args.chart:
             from src.charting import generate_charts
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1V4多仓]", args)
         return
 
     # ---- 指定股票回测 ----

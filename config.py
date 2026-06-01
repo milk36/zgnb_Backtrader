@@ -124,6 +124,11 @@ PB1V2_MULTI_INITIAL_CASH = 1_000_000    # 100万
 PB1V2_MULTI_PER_POSITION = 100_000      # 每只10万
 PB1V2_MULTI_MAX_DAILY_BUYS = 2          # 每日最多买入2只
 
+# 完美B1 V2全仓组合模拟参数（不限制总资金和持仓数量，买入所有符合条件的股票）
+PB1V2_BUYALL_INITIAL_CASH = 1_000_000_000  # 10亿（不限制）
+PB1V2_BUYALL_PER_POSITION = 100_000        # 每只10万
+PB1V2_BUYALL_MAX_DAILY_BUYS = 9999         # 不限制每日买入数量
+
 # B2倍量柱策略参数
 B2_VOL_RATIO = 1.8                    # 倍量柱量比阈值（当天量 > 前一天量 × 此值）
 B2_VOL_AVG_PERIOD = 40                # 均量线周期（MA(VOL, 40)）
@@ -157,3 +162,8 @@ ZSTOCK_MAX_POSITIONS = 10              # 最多10只
 ZSTOCK_PER_POSITION = 100_000          # 每只10万
 ZSTOCK_AI_SCORE_PASS = 4.0             # PASS 阈值
 ZSTOCK_AI_SCORE_WATCH = 3.2            # WATCH 阈值
+
+# ZStock B1 全仓组合模拟参数（不限制总资金和持仓数量，买入所有符合条件的股票）
+ZSTOCK_BUYALL_INITIAL_CASH = 1_000_000_000  # 10亿（不限制）
+ZSTOCK_BUYALL_PER_POSITION = 100_000        # 每只10万
+ZSTOCK_BUYALL_MAX_DAILY_BUYS = 9999         # 不限制每日买入数量

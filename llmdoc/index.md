@@ -14,11 +14,13 @@
 - [策略层：黄白线B1策略 V5（战法退出逻辑）](feature/strategy-huangbai-b1-v5.md): 买入逻辑与 V2 完全相同，退出逻辑全部重写为文章战法的六级退出体系（硬止损→巨量阴线清仓→放量跌停→S1信号→两根中阴线→白线次日确认→放飞减仓）。引入关键K支撑、缩量不卖保护、加速检测等新概念，移除T+N、盈利100%清仓、动量持股、半仓持股等V2出场机制。PortfolioSimulator 新增 `_check_exits_v5` 专用退出路径。
 - [策略层：黄白线B2倍量柱策略](feature/strategy-huangbai-b2.md): 包装V4信号计算，将B1入场替换为"前日B1+当日倍量柱"时序联动条件，移除动能过滤。倍量柱定义：VOL>1.8*REF(VOL,1) AND C>O AND VOL>MA(VOL,40) 且首次出现。巨量阴线过滤通过V4信号传递。复用PortfolioSimulator标准六级退出，100万/10只。理解B2包装架构或倍量柱逻辑时参考。
 - [策略层：黄白线B2_V2倍量柱策略](feature/strategy-huangbai-b2-v2.md): B2增强版，新增30日B1频次过滤（至少2次B1信号且间隔≥5天），排序改为缩量升序+流动市值降序并只取前1支。巨量阴线过滤通过V4信号传递。其余架构与B2一致（包装V4、倍量柱入场、复用六级退出）。
-- [策略层：完美B1策略](feature/strategy-perfect-b1.md): 包装V4信号计算，在V4 B1基础上叠加5种量价模式质量过滤（典型单波、白线不死叉、多波N型、跌破反转、大牛市，OR关系）。独立计算KDJ-J值和距离指标用于模式匹配。复用PortfolioSimulator标准六级退出，100万/10只，按缩量评分升序排序。理解完美B1包装架构或模式匹配逻辑时参考。
+- [策略层：完美B1策略](feature/strategy-perfect-b1.md): 包装V4信号计算，在V4 B1基础上叠加5种量价模式质量过滤（典型单波、白线不死叉、多波N型、跌破反转、大牛市，OR关系）。覆盖 vol_expand_ok 为全True（极致缩量与前期放量互斥）。独立计算KDJ-J值和距离指标用于模式匹配。复用PortfolioSimulator标准六级退出，100万/10只，按缩量评分升序排序。理解完美B1包装架构或模式匹配逻辑时参考。
 - [策略层：完美B1 V2多仓策略](feature/strategy-perfect-b1-v2-multi.md): 完美B1 V2的多仓变体，信号计算完全复用完美B1 V2（纯代理模式），不限制最大持仓数量，每日最多买入前2只候选股票。退出逻辑与完美B1 V2完全相同（标准六级退出）。理解完美B1V2多仓的仓位管理和max_daily_buys参数时参考。
+- [策略层：完美B1 V2全仓策略](feature/strategy-perfect-b1-v2-buyall.md): 完美B1 V2的全仓变体，信号计算完全复用完美B1 V2（纯代理模式），不限制总资金（10亿）和最大持仓数量，每日买入所有符合条件的候选股票。退出逻辑与完美B1 V2完全相同（标准六级退出）。理解完美B1V2全仓的资金/仓位设计或理论收益上限测试时参考。
 - [引擎层：回测引擎](feature/engine-backtester.md): Backtester 类对 Cerebro 的封装（单股回测）；PortfolioSimulator 组合级日频模拟引擎（100万/10只/每只10万，V4多仓为不限仓位/每日最多买2只）。含 `max_daily_buys` 参数控制每日买入上限、涨幅80%止盈、目标价止盈（盈亏比高点卖1/3）、巨量阴线清仓等九级退出。理解回测执行流程时参考。
 - [图表层：组合模拟K线图生成器](feature/charting-kline.md): 组合模拟交易结果的 K 线图生成模块，蜡烛图+指标线+B1信号标记+买卖标记+止损/成本线。涉及 `--chart` 参数或图表样式修改时参考。
-- [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系（含 `huangbai_v4_multi` 策略）。运行回测时首先阅读此文档。
+- [评测层：回测结果评测系统](feature/evaluator-backtest.md): 5 维度自动打分（D1 最大回撤/D2 夏普卡玛/D3 月度分布/D4 参数鲁棒/D5 佣金后利润），A-F 等级制，D1 硬伤一票否决，暗黑主题自包含 HTML 报告。理解 `--eval` 参数或评测打分逻辑时参考。
+- [CLI 使用指南](feature/cli-usage.md): main.py 的所有命令行参数、4 种运行模式、常用命令示例及参数与策略行为的对应关系（含 `--eval` 评测参数）。运行回测时首先阅读此文档。
 
 - [策略层：动能+砖策略](feature/strategy-dongneng-zhuan.md): 动能评分先筛→金砖共振再筛→筹码密集过滤的串行过滤策略，包含综合天命打分、阵营过滤、流通市值过滤、砖型图强红共振（含前日缩量/大涨横盘放量/砖块质量三个附加条件）、60日VWAP筹码密集、突然放巨量阴线过滤、T+1开盘买入及三级退出逻辑。
 - [引擎层：动能砖组合模拟器](feature/engine-dnzh-simulator.md): DongnengZhuanSimulator 日频+分钟级模拟引擎，T+1分钟确认买入（可降级为日线）、T+1合规检查、五级退出（止损→巨量阴线清仓→涨停清仓→涨幅2%部分卖出→T+2不拉升→盈利止盈）、模拟结束强制清仓、MinuteFeed分钟数据支持。通过 strategy_tag 和参数差异化，N型砖策略复用同一模拟器。
@@ -26,7 +28,7 @@
 - [策略层：N型+砖策略](feature/strategy-nxing-zhuan.md): 动能砖的变体策略，仅使用金砖共振信号选股（跳过动能预过滤和筹码密集过滤），外加流通市值>50亿过滤。巨量阴线过滤通过动能砖信号传递。T+1日线开盘买入（无分钟确认），复用 DongnengZhuanSimulator 模拟器。
 - [策略层：N型B1选股策略](feature/strategy-nxing-b1-scan.md): N型B1策略支持选股扫描和组合级模拟两种模式。选股扫描：60日内>=2次B1信号（间隔>=30天）且价格逐次抬高的N型结构筛选，统计T+3涨幅胜率。组合模拟：预加载全市场N型B1信号，100万/10只/每只10万，T+1开盘买入，六级退出。复用V4的B1七子条件、vol_expand_ok过滤链和突然放巨量阴线过滤。
 - [策略层：金叉B1选股策略](feature/strategy-jinchai-b1-scan.md): 纯选股扫描策略，筛选白线刚刚金叉黄线后出现B1信号的股票。流通市值>50亿，复用N型B1的B1七子条件、vol_expand_ok过滤链、突然放巨量阴线过滤、8项假案例排除。统计T+5涨幅>=10%的概率，支持日期区间筛选，自动生成K线图。不支持回测和组合模拟。
-- [策略层：ZStock B1选股策略 + AI评分 + 管道脚本](feature/strategy-zstock-b1.md): 参考 StockTradebyZ 的 4-Filter B1 选股逻辑（KDJ低位+知行线+周线多头+最大量非阴），配套 QuantitativeScorer 四维评分模块（趋势/价格/量价/异动）和 run_pipeline.py 三阶段管道脚本（选股→AI评分→回测）。理解 ZStock B1 策略设计、AI评分体系或管道脚本使用时参考。
+- [策略层：ZStock B1选股策略 + AI评分 + 管道脚本](feature/strategy-zstock-b1.md): 参考 StockTradebyZ 的 4-Filter B1 选股逻辑（KDJ低位+知行线+周线多头+最大量非阴），配套 QuantitativeScorer 四维评分模块（趋势/价格/量价/异动）和 run_pipeline.py 三阶段管道脚本（选股→AI评分→回测）。含全仓变体（zstock_b1_buyall）：纯代理模式复用 ZStock B1 信号，10亿资金/不限持仓/买入所有候选，验证理论收益上限。理解 ZStock B1 策略设计、全仓版仓位管理或管道脚本使用时参考。
 
 ## SOP Documents
 

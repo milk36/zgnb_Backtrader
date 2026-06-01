@@ -11,9 +11,10 @@
 与 B2 策略相同的薄包装架构，对 V4 `_compute_all_bar_signals()` 进行二次加工：
 
 1. 调用 V4 的 `_compute_all_bar_signals()` 获取完整信号字典
-2. 独立计算 KDJ-J 值（V4 未返回 J 值）
-3. 计算距离指标（`dist_w`、`dist_y`）
-4. 执行5种模式匹配，覆盖 `b1` 字段
+2. 覆盖 `vol_expand_ok` 为全 True（完美B1核心特征是极致缩量，与前期放量要求互斥）
+3. 独立计算 KDJ-J 值（V4 未返回 J 值）
+4. 计算距离指标（`dist_w`、`dist_y`）
+5. 执行5种模式匹配，覆盖 `b1` 字段
 
 ### 5种模式匹配逻辑：`_compute_pattern_matches()`
 
@@ -70,7 +71,7 @@
 
 ## 4. Attention
 
-- 完美B1依赖 V4 的 `_compute_all_bar_signals`，V4 的 B1/vol_expand_ok/巨量阴线过滤变更会直接传递
+- 完美B1依赖 V4 的 `_compute_all_bar_signals`，V4 的 B1/巨量阴线过滤变更会直接传递，但 **vol_expand_ok 已被覆盖为全 True**（极致缩量与前期放量互斥）
 - 突然放巨量阴线过滤通过 V4 信号字典的 `no_huge_vol_bearish` 字段传递，本策略无独立实现
 - KDJ-J 值在本策略中独立计算（V4 信号字典未返回 J 值），公式：`J = 3*K - 2*D`（MyTT SMA）
 - 无 Backtrader 策略类，不存在三处同步问题
