@@ -3,7 +3,7 @@
 基于 thinking/完美B1.md 中6种量价模式，在V4 B1信号基础上增加模式质量过滤。
 
 核心逻辑：
-1. V4 B1信号作为基础（七子条件OR + 盈亏比 + vol_expand_ok）
+1. V4 B1信号作为基础（七子条件OR + 盈亏比），移除 vol_expand_ok（极致缩量与前期放量互斥）
 2. 叠加5种模式匹配（OR），仅保留匹配强势模式的B1
 3. 过滤掉短期B1（缩量评分>35%且无其他强势模式）
 4. 按缩量评分升序排序（缩量越极致优先级越高）
@@ -160,6 +160,9 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     p1, p2, p3, p4, p5, pattern_matched, pattern_type = _compute_pattern_matches(
         C, white, yellow, shrink_score, J, dist_w, dist_y)
 
+    # 移除 vol_expand_ok：完美B1核心特征是极致缩量，与前期放量要求互斥
+    signals["vol_expand_ok"] = np.ones(len(C), dtype=bool)
+
     # 完美B1 = V4 B1 & 至少匹配一种强势模式
     signals["b1"] = b1_original & pattern_matched
 
@@ -197,7 +200,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
         "market_macd": True,
         "b1": bool(all_bars["b1"][i]),
         "dongneng_recent": True,
-        "vol_expand": bool(all_bars["vol_expand_ok"][i]),
+        "vol_expand": True,  # 完美B1移除vol_expand_ok过滤
         "no_huge_vol_bearish": bool(all_bars["no_huge_vol_bearish"][i]),
         "close": float(C[i]),
         "J": float(all_bars["J"][i]),
