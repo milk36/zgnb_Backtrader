@@ -1,23 +1,28 @@
-"""完美B1 V2策略 — 基于量价动态过程的5维评分识别
+"""完美B1 V2策略 — 必要条件门控 + 四通道OR识别
 
-不使用静态阈值模板匹配，而是从量价关系和趋势结构中动态评分：
+基于 thinking/完美B1.md 中11个历史案例的前期量价关系和趋势特征，
+识别有效B1买入信号。核心架构：建仓波必要条件 + 四通道OR + 预警过滤。
 
-5维评分体系：
-  维度1 建仓强度 (20%): 近期是否存在放量拉升的建仓波
-  维度2 缩量洗盘 (30%): 当前成交量相对近期高峰的缩减程度（最核心维度）
-  维度3 超卖拐点 (20%): KDJ-J/RSI超卖深度 + 拐点回升确认
-  维度4 支撑结构 (15%): 白/黄线位置关系、白线不死叉、均线趋势
-  维度5 多波递进 (15%): 上穿黄线次数、量能递进、高低点抬高
+必要条件（11/11案例共有）：
+  近期存在带量拉升的建仓波（放量阳线密度 + 区间涨幅 + 倍量柱 OR检测）
 
-核心逻辑：
-1. V4 B1信号作为基础（七子条件OR + 盈亏比），移除 vol_expand_ok
-2. 计算5维过程评分，加权综合得到 final_score (0-100)
-3. 完美B1 = V4_B1 AND (final_score >= 45) AND NOT 预警条件
-4. 按综合评分降序排序（评分越高优先级越高）
+四通道OR（通过任一即可）：
+  通道A 缩量极致型: shrink<30% & (超卖 OR 贴近均线)
+    覆盖: 华纳药厂/宁波韵升/微芯生物/方正科技/国轩高科/野马电池/光电股份/新瀚新材/昂利康
+  通道B 白线不死叉型: 白线30天>=黄线 & J<20 & vs黄线>-3% & 洗盘充分(>=3天)
+    覆盖: 澄天伟业/国轩高科
+  通道C 极端超卖型: J<0 或 RSI<15 & shrink<40%
+    覆盖: 微芯生物/野马电池/光电股份
+  通道D 大牛市型: 40日涨幅>80% & shrink<30% & 贴近白线<8% & J<15
+    覆盖: 昂利康
 
-预警条件：缩量评分>35%（洗盘不充分）AND 5日振幅极小（回调不足）
+预警条件（通道B豁免）：
+  shrink>35% & (回调深度<8% 或 5日振幅<2.5%) → 过滤赢时胜
 
-架构：包装 V4 的 _compute_all_bar_signals()，叠加5维动态评分，
+排序：通道优先级(A=1 > C=2 > D=3 > B=4) × 10000 - final_score
+5维评分保留用于排序和日志，不再作为门控条件。
+
+架构：包装 V4 的 _compute_all_bar_signals()，叠加通道检测，
 复用 PortfolioSimulator 的标准六级退出，100万/10只。
 """
 
@@ -33,15 +38,11 @@ from config import (
     HUANGBAI_M1, HUANGBAI_M2, HUANGBAI_M3, HUANGBAI_M4,
     HUANGBAI_N, HUANGBAI_M, HUANGBAI_N1, HUANGBAI_N2,
     DNZH_MIN_MARKET_CAP,
-    MARKET_INDEX_CODE, MARKET_MACD_FAST, MARKET_MACD_SLOW, MARKET_MACD_SIGNAL,
 )
 from src.strategies.huangbai_b1_v4_strategy import (
     _compute_all_bar_signals as _v4_compute_all_bar_signals,
     _compute_signals as _v4_compute_signals,
     _get_all_codes,
-    compute_market_macd,
-    compute_market_macd_for_trading_days,
-    load_market_index,
 )
 from src.strategies.dongneng_zhuan_strategy import _load_capital_data
 
@@ -64,73 +65,143 @@ def _init_process(tdxdir, market):
 
 
 # ================================================================== #
-#  5维动态评分体系                                                      #
+#  通道名称与常量                                                      #
 # ================================================================== #
 
-PATTERN_NAMES = {
+CHANNEL_NAMES = {
     0: "不匹配",
-    1: "超卖缩量拐头",       # 原型: 华纳药厂
-    2: "多波N型递进缩量",     # 原型: 宁波韵升
-    3: "倍量柱快速启动",      # 原型: 微芯生物
-    4: "双波递进B1",          # 原型: 方正科技
-    5: "白线不死叉",          # 原型: 澄天伟业
-    6: "深度缩量回调",        # 原型: 国轩高科
-    7: "跌破黄线反转",        # 原型: 野马电池
-    8: "长期多波极致缩量",    # 原型: 光电股份
-    9: "双倍量柱爆发",        # 原型: 新瀚新材
-    10: "大牛市快速B1",       # 原型: 昂利康
-    11: "预警(缩量不极致)",   # 原型: 赢时胜
+    1: "缩量极致型",      # 通道A
+    2: "白线不死叉型",    # 通道B
+    3: "极端超卖型",      # 通道C
+    4: "大牛市型",        # 通道D
 }
 
-# 评分阈值
-PASS_THRESHOLD = 45       # >= 45 判定为完美B1
-WARNING_SHRINK = 0.35     # shrink > 35% 触发预警（洗盘不充分）
 
+# ================================================================== #
+#  四通道OR检测 + 建仓波必要条件                                        #
+# ================================================================== #
+
+def _compute_channel_signals(C, H, L, O, V, white, yellow, shrink_score, J, rsi3):
+    """四通道OR检测 + 建仓波必要条件
+
+    Returns:
+        dict 包含各通道通过标记、建仓波存在性、预警条件、通道编号
+    """
+    # ===== 必要条件：建仓波存在 =====
+    v_ma20 = MA(V, 20)
+    big_vol_yang = (C > O) & (V > v_ma20 * 1.5)
+    cnt_bvy_20 = COUNT(big_vol_yang.astype(float), 20)
+    cnt_bvy_40 = COUNT(big_vol_yang.astype(float), 40)
+    cnt_bvy_60 = COUNT(big_vol_yang.astype(float), 60)
+
+    rise_10 = (C - REF(C, 10)) / np.maximum(REF(C, 10), 0.001) * 100
+    rise_20 = (C - REF(C, 20)) / np.maximum(REF(C, 20), 0.001) * 100
+    rise_40 = (C - REF(C, 40)) / np.maximum(REF(C, 40), 0.001) * 100
+    rise_60 = (C - REF(C, 60)) / np.maximum(REF(C, 60), 0.001) * 100
+
+    vol_ratio_prev = V / np.maximum(REF(V, 1), 1)
+    cnt_dv_20 = COUNT((vol_ratio_prev >= 2.0).astype(float), 20)
+    cnt_dv_40 = COUNT((vol_ratio_prev >= 2.0).astype(float), 40)
+
+    # 短波建仓: 20日内>=3根放量阳线 + 10日涨幅>10%
+    has_short_wave = (cnt_bvy_20 >= 3) & (rise_10 > 10)
+    # 中波建仓: 20日内有倍量柱 + 20日涨幅>15%
+    has_mid_wave = (cnt_dv_20 >= 1) & (rise_20 > 15)
+    # 长波建仓: 40日内>=3根放量阳线 + 40日涨幅>15%
+    has_long_wave = (cnt_bvy_40 >= 3) & (rise_40 > 15)
+    # 超长波建仓: 60日内>=5根放量阳线 + 60日涨幅>20% (澄天伟业32天建仓)
+    has_very_long_wave = (cnt_bvy_60 >= 5) & (rise_60 > 20)
+    # 倍量柱加成: 40日内>=2根倍量柱
+    has_double_vol = cnt_dv_40 >= 2
+
+    accumulation_exists = (has_short_wave | has_mid_wave | has_long_wave
+                           | has_very_long_wave | has_double_vol)
+
+    # ===== 通道A: 缩量极致型 =====
+    shrink_ok = shrink_score < 0.30
+    j_oversold = J < 14
+    rsi_oversold = rsi3 < 25
+    near_yellow = ABS(C - yellow) / np.maximum(yellow, 0.001) * 100 < 3.0
+    near_white = ABS(C - white) / np.maximum(white, 0.001) * 100 < 3.0
+    channel_a = shrink_ok & (j_oversold | rsi_oversold | near_yellow | near_white)
+
+    # ===== 通道B: 白线不死叉型 =====
+    white_no_death = EVERY(white >= yellow, 30)
+    j_low = J < 20
+    above_yellow_support = (C - yellow) / np.maximum(yellow, 0.001) * 100 > -3.0
+    below_white_cnt = COUNT((C < white).astype(float), 10)
+    sufficient_washout = below_white_cnt >= 3
+    channel_b = white_no_death & j_low & above_yellow_support & sufficient_washout
+
+    # ===== 通道C: 极端超卖型 =====
+    # shrink<35%: 比通道A宽松但不让赢时胜(37.1%)通过
+    channel_c = ((J < 0) | (rsi3 < 15)) & (shrink_score < 0.35)
+
+    # ===== 通道D: 大牛市型 =====
+    channel_d = ((rise_40 > 80) & (shrink_score < 0.30)
+                 & (ABS(C - white) / np.maximum(white, 0.001) * 100 < 8.0)
+                 & (J < 15))
+
+    # ===== 通道汇总 =====
+    channel_pass = channel_a | channel_b | channel_c | channel_d
+
+    # ===== 预警条件（通道B豁免）=====
+    warning_shrink = shrink_score > 0.35
+    pullback_depth = (HHV(H, 20) - LLV(L, 5)) / np.maximum(HHV(H, 20), 0.001) * 100
+    daily_amp = (H - L) / np.maximum(L, 0.001) * 100
+    is_warning = warning_shrink & ((pullback_depth < 8.0) | (MA(daily_amp, 5) < 2.5))
+    is_warning_effective = is_warning & ~channel_b
+
+    # ===== 通道编号 =====
+    channel_type = np.where(channel_a, 1,
+                   np.where(channel_c, 3,
+                   np.where(channel_d, 4,
+                   np.where(channel_b, 2, 0))))
+
+    return {
+        "accumulation_exists": accumulation_exists,
+        "channel_a": channel_a,
+        "channel_b": channel_b,
+        "channel_c": channel_c,
+        "channel_d": channel_d,
+        "channel_pass": channel_pass,
+        "channel_type": channel_type,
+        "is_warning": is_warning,
+        "is_warning_effective": is_warning_effective,
+        "rise_40": rise_40,
+    }
+
+
+# ================================================================== #
+#  5维评分（排序用，不作为门控条件）                                     #
+# ================================================================== #
 
 def _calc_accumulation_score(C, O, V):
-    """维度1: 建仓强度评分 (0-100)
-
-    用多窗口(10/20/40/60日)的放量阳线密度和区间涨幅，
-    近似"是否存在带量拉升的建仓波"。
-    """
+    """维度1: 建仓强度评分 (0-100)"""
     v_ma20 = MA(V, 20)
-
-    # 放量阳线: C>O 且 V>MA(V,20)*1.5
     big_vol_yang = ((C > O) & (V > v_ma20 * 1.5)).astype(float)
     cnt_bvy_20 = COUNT(big_vol_yang, 20)
     cnt_bvy_40 = COUNT(big_vol_yang, 40)
     cnt_bvy_60 = COUNT(big_vol_yang, 60)
 
-    # 区间涨幅
     rise_10 = (C - REF(C, 10)) / np.maximum(REF(C, 10), 0.001) * 100
     rise_20 = (C - REF(C, 20)) / np.maximum(REF(C, 20), 0.001) * 100
     rise_40 = (C - REF(C, 40)) / np.maximum(REF(C, 40), 0.001) * 100
 
-    # 倍量柱计数 (20日内)
     vol_ratio_prev = V / np.maximum(REF(V, 1), 1)
     double_vol = (vol_ratio_prev >= 2.0).astype(float)
     cnt_dv_20 = COUNT(double_vol, 20)
 
-    # 量价齐升: V > MA(V,20)*2 且 C>O
     vol_price_surge = ((V > v_ma20 * 2) & (C > O)).astype(float)
     cnt_vps_20 = COUNT(vol_price_surge, 20)
 
-    # 短波建仓 (7-15天, +15%~30%)
     short_wave = (np.clip(cnt_bvy_20 / 3.0, 0, 1)
                  * np.clip(rise_10 / 15.0, 0, 1) * 30)
-
-    # 中波建仓 (20-30天, +15%~40%)
     mid_wave = (np.clip(cnt_bvy_40 / 5.0, 0, 1)
                * np.clip(rise_20 / 20.0, 0, 1) * 30)
-
-    # 长波建仓 (40-60天, +30%~80%)
     long_wave = (np.clip(cnt_bvy_60 / 7.0, 0, 1)
                 * np.clip(rise_40 / 30.0, 0, 1) * 20)
-
-    # 倍量柱加成
     double_vol_bonus = np.clip(cnt_dv_20 / 3.0, 0, 1) * 10
-
-    # 量价齐升加成
     vps_bonus = np.clip(cnt_vps_20 / 2.0, 0, 1) * 10
 
     return np.clip(short_wave + mid_wave + long_wave
@@ -140,15 +211,14 @@ def _calc_accumulation_score(C, O, V):
 def _calc_washout_score(V, shrink_score):
     """维度2: 缩量洗盘评分 (0-100)
 
-    当前成交量相对近期高峰的缩减程度，越高代表洗盘越极致。
+    阈值已放宽：shrink 零分阈值从 0.40→0.70，让澄天伟业也能得分。
     """
-    hhv_v_20 = HHV(V, 20)
     hhv_v_50 = HHV(V, 50)
     v_ma60 = MA(V, 60)
 
-    # (a) shrink极致度: shrink<18%→满分, >40%→0分 (50分)
+    # (a) shrink极致度: shrink<18%→满分, >70%→0分 (50分)
     _s = np.nan_to_num(shrink_score, nan=1.0)
-    s1 = np.clip((0.40 - _s) / (0.40 - 0.18), 0, 1) * 50
+    s1 = np.clip((0.70 - _s) / (0.70 - 0.18), 0, 1) * 50
 
     # (b) V/MA(V,60) 极致度: <40%→满分, >80%→0分 (25分)
     v_ratio_60 = V / np.maximum(v_ma60, 1)
@@ -169,13 +239,13 @@ def _calc_washout_score(V, shrink_score):
 def _calc_oversold_score(J, rsi3):
     """维度3: 超卖拐点评分 (0-100)
 
-    J值/RSI超卖深度 + 是否出现拐点回升。
+    阈值已放宽：J 零分阈值从 15→30，让方正科技①也能得分。
     """
     _j = np.nan_to_num(J, nan=50.0)
     _r = np.nan_to_num(rsi3, nan=50.0)
 
-    # (a) J值超卖深度: J<-10→满分, J>15→0分 (40分)
-    j_score = np.clip((15.0 - _j) / (15.0 + 10.0), 0, 1) * 40
+    # (a) J值超卖深度: J<-10→满分, J>30→0分 (40分)
+    j_score = np.clip((30.0 - _j) / (30.0 + 10.0), 0, 1) * 40
 
     # (b) RSI超卖深度: RSI<12→满分, RSI>30→0分 (30分)
     rsi_score = np.clip((30.0 - _r) / (30.0 - 12.0), 0, 1) * 30
@@ -196,7 +266,7 @@ def _calc_oversold_score(J, rsi3):
 def _calc_support_score(C, white, yellow):
     """维度4: 支撑结构评分 (0-100)
 
-    白/黄线位置关系、白线不死叉、均线趋势。
+    阈值已放宽：贴近黄线零分阈值从 5%→50%，让昂利康也能得分。
     """
     pct_w = (C - white) / np.maximum(white, 0.001) * 100
     pct_y = (C - yellow) / np.maximum(yellow, 0.001) * 100
@@ -205,8 +275,8 @@ def _calc_support_score(C, white, yellow):
     white_above_yellow_30 = EVERY(white >= yellow, 30)
     s_no_death = white_above_yellow_30.astype(float) * 30
 
-    # (b) 贴近黄线: |pct_y|<1%→满分, >5%→0分 (25分)
-    s_yellow_near = np.clip((5.0 - np.abs(pct_y)) / 4.0, 0, 1) * 25
+    # (b) 贴近黄线: |pct_y|<5%→满分, >50%→0分 (25分)
+    s_yellow_near = np.clip((50.0 - np.abs(pct_y)) / 45.0, 0, 1) * 25
 
     # (c) 贴近白线: |pct_w|<1%→满分, >3%→0分 (20分)
     s_white_near = np.clip((3.0 - np.abs(pct_w)) / 2.0, 0, 1) * 20
@@ -225,11 +295,7 @@ def _calc_support_score(C, white, yellow):
 
 
 def _calc_multiwave_score(C, H, V, yellow):
-    """维度5: 多波递进评分 (0-100)
-
-    上穿黄线次数 + 量能递进 + 高点抬高，识别多波段N型结构。
-    """
-    # (a) 60日内上穿黄线次数 (40分)
+    """维度5: 多波递进评分 (0-100)"""
     cross_up = CROSS(C, yellow)
     wave_cnt_60 = COUNT(cross_up, 60)
     wave_cnt_90 = COUNT(cross_up, 90)
@@ -237,15 +303,12 @@ def _calc_multiwave_score(C, H, V, yellow):
               np.where(wave_cnt_60 >= 2, 30.0,
               np.where(wave_cnt_60 >= 1, 15.0, 0.0)))
 
-    # (b) 90日内多波 (15分)
     s_long_waves = np.where(wave_cnt_90 >= 2, 15.0, 0.0)
 
-    # (c) 量能递进缩量: V/HHV(V,30) < 50% 说明缩到近期峰量一半以下 (25分)
     hhv_v_30 = HHV(V, 30)
     v_ratio_to_peak = V / np.maximum(hhv_v_30, 1)
     s_shrink_vs_peak = np.clip((0.6 - v_ratio_to_peak) / 0.4, 0, 1) * 25
 
-    # (d) 高点抬高: 近20日高点接近近60日高点 (20分)
     hhv_h_20 = HHV(H, 20)
     hhv_h_60 = HHV(H, 60)
     s_high_rising = (hhv_h_20 >= hhv_h_60 * 0.95).astype(float) * 20
@@ -253,99 +316,20 @@ def _calc_multiwave_score(C, H, V, yellow):
     return np.clip(s_waves + s_long_waves + s_shrink_vs_peak + s_high_rising, 0, 100)
 
 
-def _classify_pattern(scores, C, white, yellow, shrink_score):
-    """根据5维子分确定模式分类编号"""
-    acc = scores["accumulation_score"]
-    wash = scores["washout_score"]
-    over = scores["oversold_score"]
-    supp = scores["support_score"]
-    multi = scores["multiwave_score"]
-
-    _s = np.nan_to_num(shrink_score, nan=1.0)
-    pct_y = (C - yellow) / np.maximum(yellow, 0.001) * 100
-
-    pattern_type = np.zeros(len(C), dtype=int)
-
-    # 按优先级从低到高赋值（高优先级后写覆盖）
-    # P5 白线不死叉
-    mask5 = (supp > 70) & (wash > 40)
-    pattern_type[mask5] = 5
-
-    # P10 大牛市快速B1
-    mask10 = (pct_y > 30) & (wash > 50) & (acc > 50)
-    pattern_type[mask10] = 10
-
-    # P4 双波递进B1
-    mask4 = (multi >= 30) & (multi < 50) & (wash > 50)
-    pattern_type[mask4] = 4
-
-    # P2 多波N型递进缩量
-    mask2 = (multi > 50) & (wash > 50)
-    pattern_type[mask2] = 2
-
-    # P6 深度缩量回调
-    mask6 = (wash > 70) & (supp > 50)
-    pattern_type[mask6] = 6
-
-    # P9 双倍量柱爆发
-    mask9 = (acc > 50) & (multi > 30) & (wash > 60)
-    pattern_type[mask9] = 9
-
-    # P3 倍量柱快速启动
-    mask3 = (acc > 60) & (over > 60)
-    pattern_type[mask3] = 3
-
-    # P7 跌破黄线反转
-    mask7 = (C < yellow) & (over > 60) & (wash > 50)
-    pattern_type[mask7] = 7
-
-    # P1 超卖缩量拐头
-    mask1 = (over > 60) & (wash > 50) & (np.abs(pct_y) <= 5)
-    pattern_type[mask1] = 1
-
-    # P8 长期多波极致缩量
-    mask8 = (wash > 80) & (multi > 40)
-    pattern_type[mask8] = 8
-
-    # P11 预警
-    mask11 = _s > WARNING_SHRINK
-    pattern_type[mask11] = 11
-
-    return pattern_type
-
-
 def _compute_dynamic_process_scores(C, H, L, O, V, white, yellow,
-                                    shrink_score, J, rsi3, b1_original):
-    """计算5维动态过程评分，替代旧的 _compute_pattern_matches()"""
-    # 5个维度评分
+                                    shrink_score, J, rsi3):
+    """计算5维综合评分（排序用，不作为门控条件）"""
     accumulation = _calc_accumulation_score(C, O, V)
     washout = _calc_washout_score(V, shrink_score)
     oversold = _calc_oversold_score(J, rsi3)
     support = _calc_support_score(C, white, yellow)
     multiwave = _calc_multiwave_score(C, H, V, yellow)
 
-    # 加权综合评分
     final_score = (accumulation * 0.20
                    + washout * 0.30
                    + oversold * 0.20
                    + support * 0.15
                    + multiwave * 0.15)
-
-    # 模式分类
-    pattern_type = _classify_pattern(
-        {"accumulation_score": accumulation, "washout_score": washout,
-         "oversold_score": oversold, "support_score": support,
-         "multiwave_score": multiwave},
-        C, white, yellow, shrink_score)
-
-    # 完美B1判定: 评分达标
-    is_perfect_b1 = final_score >= PASS_THRESHOLD
-
-    # 预警: 缩量不极致 + 回调不充分
-    _s = np.nan_to_num(shrink_score, nan=1.0)
-    daily_amp = (H - L) / np.maximum(L, 0.001) * 100
-    low_amp_5d = MA(daily_amp, 5)
-    is_warning = (_s > WARNING_SHRINK) & (low_amp_5d < 3.0)
 
     return {
         "accumulation_score": accumulation,
@@ -354,9 +338,6 @@ def _compute_dynamic_process_scores(C, H, L, O, V, white, yellow,
         "support_score": support,
         "multiwave_score": multiwave,
         "final_score": final_score,
-        "pattern_type": pattern_type,
-        "is_perfect_b1": is_perfect_b1,
-        "is_warning": is_warning,
     }
 
 
@@ -366,7 +347,7 @@ def _compute_dynamic_process_scores(C, H, L, O, V, white, yellow,
 
 
 def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
-    """完美B1 V2: V4 B1 + 11种个股模式过滤"""
+    """完美B1 V2: V4 B1 + 建仓波必要条件 + 四通道OR + 预警过滤"""
     signals = _v4_compute_all_bar_signals(C, H, L, O, V, dates, params,
                                           capital_shares)
     if signals is None:
@@ -377,7 +358,7 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     yellow = signals["yellow"]
     shrink_score = signals["shrink_score"]
 
-    # ---- KDJ-J（与v1相同） ----
+    # ---- KDJ-J ----
     llv9 = LLV(L, 9)
     hhv9 = HHV(H, 9)
     denom9 = hhv9 - llv9
@@ -386,34 +367,45 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     D = SMA(K, 3, 1)
     J = 3 * K - 2 * D
 
-    # ---- V2新增指标 ----
-
-    # RSI(3)
+    # ---- RSI(3) ----
     diff = C - REF(C, 1)
     diff = np.nan_to_num(diff, nan=0.0)
     up = SMA(np.maximum(diff, 0), 3, 1)
     down = SMA(np.abs(diff), 3, 1)
     rsi3 = np.where(down != 0, up / down * 100, 50.0)
 
-    # 签百分比（vs白线、vs黄线）
+    # ---- 签百分比（vs白线、vs黄线） ----
     pct_w = (C - white) / np.maximum(white, 0.001) * 100
     pct_y = (C - yellow) / np.maximum(yellow, 0.001) * 100
 
-    # V/MA(V,60) 60日均量比值
+    # ---- V/MA(V,60) ----
     v_ma60 = MA(V, 60)
     v_ratio_60 = V / np.maximum(v_ma60, 1)
 
-    # 倍量柱检测: V > 2 * REF(V,1)
-    # ---- 5维动态评分 ----
+    # ---- 四通道OR检测 ----
+    channels = _compute_channel_signals(
+        C, H, L, O, V, white, yellow, shrink_score, J, rsi3)
+
+    # ---- 5维评分（排序用） ----
     scores = _compute_dynamic_process_scores(
-        C, H, L, O, V, white, yellow, shrink_score, J, rsi3, b1_original)
+        C, H, L, O, V, white, yellow, shrink_score, J, rsi3)
 
     # 移除 vol_expand_ok：完美B1核心特征是极致缩量，与前期放量要求互斥
     signals["vol_expand_ok"] = np.ones(len(C), dtype=bool)
 
-    # 完美B1 = V4 B1 & 评分达标 & 非预警
-    is_perfect = scores["is_perfect_b1"] & ~scores["is_warning"]
-    signals["b1"] = b1_original & is_perfect
+    # 完美B1 = V4_B1 & 建仓波存在 & 通道通过 & 非预警
+    perfect_b1 = (b1_original
+                  & channels["accumulation_exists"]
+                  & channels["channel_pass"]
+                  & ~channels["is_warning_effective"])
+    signals["b1"] = perfect_b1
+
+    # 通道优先级排序（A=1 > C=2 > D=3 > B=4），同通道按评分降序
+    channel_priority = np.where(channels["channel_a"], 1.0,
+                      np.where(channels["channel_c"], 2.0,
+                      np.where(channels["channel_d"], 3.0,
+                      np.where(channels["channel_b"], 4.0, 9.0))))
+    signals["b2_sort_primary"] = channel_priority * 10000 - scores["final_score"]
 
     # 保存辅助字段
     signals["b1_original"] = b1_original
@@ -423,8 +415,19 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     signals["oversold_score"] = scores["oversold_score"]
     signals["support_score"] = scores["support_score"]
     signals["multiwave_score"] = scores["multiwave_score"]
-    signals["pattern_type"] = scores["pattern_type"]
-    signals["is_warning"] = scores["is_warning"]
+
+    # 通道相关字段
+    signals["accumulation_exists"] = channels["accumulation_exists"]
+    signals["channel_a"] = channels["channel_a"]
+    signals["channel_b"] = channels["channel_b"]
+    signals["channel_c"] = channels["channel_c"]
+    signals["channel_d"] = channels["channel_d"]
+    signals["channel_pass"] = channels["channel_pass"]
+    signals["channel_type"] = channels["channel_type"]
+    signals["is_warning"] = channels["is_warning"]
+    signals["is_warning_effective"] = channels["is_warning_effective"]
+
+    # 指标字段
     signals["J"] = J
     signals["RSI"] = rsi3
     signals["pct_w"] = pct_w
@@ -432,9 +435,6 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
     signals["v_ratio_60"] = v_ratio_60
     signals["dist_w"] = ABS(C - white) / np.maximum(C, 0.001) * 100
     signals["dist_y"] = ABS(C - yellow) / np.maximum(C, 0.001) * 100
-
-    # 排序字段：使用 -final_score 实现评分降序（PortfolioSimulator 按升序取最优）
-    signals["b2_sort_primary"] = -scores["final_score"]
 
     return signals
 
@@ -455,7 +455,7 @@ def _compute_signals(C, H, L, O, V, dates, params):
         "market_macd": True,
         "b1": bool(all_bars["b1"][i]),
         "dongneng_recent": True,
-        "vol_expand": True,  # 完美B1移除vol_expand_ok过滤
+        "vol_expand": True,
         "no_huge_vol_bearish": bool(all_bars["no_huge_vol_bearish"][i]),
         "close": float(C[i]),
         "J": float(all_bars["J"][i]),
@@ -467,12 +467,14 @@ def _compute_signals(C, H, L, O, V, dates, params):
         "oversold_score": float(all_bars["oversold_score"][i]),
         "support_score": float(all_bars["support_score"][i]),
         "multiwave_score": float(all_bars["multiwave_score"][i]),
-        "pattern_type": int(all_bars["pattern_type"][i]),
+        "channel_type": int(all_bars["channel_type"][i]),
         "is_warning": bool(all_bars["is_warning"][i]),
+        "is_warning_effective": bool(all_bars["is_warning_effective"][i]),
         "pct_w": float(all_bars["pct_w"][i]),
         "pct_y": float(all_bars["pct_y"][i]),
         "v_ratio_60": float(all_bars["v_ratio_60"][i]),
         "b1_original": bool(all_bars["b1_original"][i]),
+        "accumulation_exists": bool(all_bars["accumulation_exists"][i]),
     }
 
 
@@ -513,20 +515,11 @@ def _scan_one(code, params, skip_weekly, market_macd_ok=True):
 def scan_all(stock_type="main", skip_weekly=False,
              tdxdir=TDX_DIR, market=TDX_MARKET, max_workers=SCAN_MAX_WORKERS,
              skip_on_bear=False):
-    """完美B1 V2全市场扫描（含大盘MACD多头过滤）"""
+    """完美B1 V2全市场扫描（不检查大盘MACD，完美B1不受大盘约束）"""
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
-    # 计算大盘MACD状态
+    # 完美B1不受大盘MACD约束
     market_macd_ok = True
-    market_df = load_market_index(tdxdir, market)
-    if market_df is not None:
-        market_close = market_df["close"].values.astype(float)
-        _, _, market_bullish = compute_market_macd(market_close)
-        market_macd_ok = bool(market_bullish[-1])
-        status = "多头" if market_macd_ok else "空头(只卖不买)"
-        print(f"  大盘MACD状态: {status}")
-    else:
-        print("  警告: 无法加载大盘指数数据，大盘MACD过滤将被跳过")
 
     codes = _get_all_codes(tdxdir)
     total = len(codes)
@@ -562,13 +555,13 @@ def scan_all(stock_type="main", skip_weekly=False,
                 errors += 1
             elif sig is not None:
                 results.append(sig)
-                pt = sig.get("pattern_type", 0)
-                pname = PATTERN_NAMES.get(pt, "?")
+                ct = sig.get("channel_type", 0)
+                cname = CHANNEL_NAMES.get(ct, "?")
                 fs = sig.get('final_score', 0)
                 print(f"  {code}  C={sig['close']:.2f}  "
                       f"评分={fs:.1f}  J={sig['J']:.1f}  "
                       f"缩量={sig['shrink_score']:.3f}  "
-                      f"模式={pname}")
+                      f"通道={cname}")
             if done % 500 == 0:
                 print(f"  ... 已扫描 {done}/{total} ({done/total*100:.0f}%)  "
                       f"命中 {len(results)}  耗时 {time.time()-t0:.1f}s")
@@ -586,12 +579,12 @@ def scan_all(stock_type="main", skip_weekly=False,
         print(f"{'=' * 60}")
         for r in results:
             tag = " <<< TOP" if r == results[0] else ""
-            pt = r.get("pattern_type", 0)
-            pname = PATTERN_NAMES.get(pt, "?")
+            ct = r.get("channel_type", 0)
+            cname = CHANNEL_NAMES.get(ct, "?")
             fs = r.get('final_score', 0)
             print(f"  {r['code']}  C={r['close']:.2f}  "
                   f"评分={fs:.1f}  缩量={r['shrink_score']:.3f}  "
-                  f"模式={pname}{tag}")
+                  f"通道={cname}{tag}")
 
     return results, market_macd_ok
 
@@ -631,11 +624,11 @@ def _scan_one_all_bars(code, params):
 def preload_all_signals(start="2024-01-01", end="2025-12-31",
                         stock_type="main", max_workers=SCAN_MAX_WORKERS,
                         tdxdir=TDX_DIR, market=TDX_MARKET):
-    """完美B1 V2预加载（含大盘MACD多头过滤）
+    """完美B1 V2预加载（不检查大盘MACD，完美B1不受大盘约束）
 
     Returns:
-        (all_signals, trading_days, market_macd_bullish) —
-        market_macd_bullish 为每日大盘MACD多头布尔数组
+        (all_signals, trading_days, None) —
+        第三个元素固定为 None，表示不使用大盘MACD过滤
     """
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -710,16 +703,5 @@ def preload_all_signals(start="2024-01-01", end="2025-12-31",
         for ed in error_details:
             print(f"  错误: {ed}")
 
-    # 计算大盘MACD多头状态
-    market_macd_bullish = None
-    if len(trading_days) > 0:
-        print("  计算大盘MACD状态...")
-        market_macd_bullish = compute_market_macd_for_trading_days(
-            trading_days, tdxdir, market)
-        if market_macd_bullish is not None:
-            bull_count = np.sum(market_macd_bullish)
-            total_days = len(market_macd_bullish)
-            print(f"  大盘MACD多头天数: {bull_count}/{total_days} "
-                  f"({bull_count/total_days*100:.1f}%)")
-
-    return all_signals, trading_days, market_macd_bullish
+    # 完美B1不受大盘MACD约束，固定返回None
+    return all_signals, trading_days, None
