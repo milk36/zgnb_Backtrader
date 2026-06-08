@@ -27,6 +27,7 @@
 | `perfect_b1_v2_buyall` | 完美B1 V2全仓（10亿资金+不限仓位+全量买入） | 组合模拟（默认）/ 仅扫描 |
 | `nxing_b1` | N型B1选股 | 组合模拟（默认）/ 仅扫描 |
 | `jinchai_b1` | 金叉B1选股 | 仅扫描（纯选股+K线图） |
+| `huangbai_v4_ml` | V4 ML增强（V4 B1 + LightGBM三分类评分） | 组合模拟（默认）/ 仅扫描 |
 
 ### 运行模式
 
@@ -95,11 +96,22 @@
 
 注意：`jinchai_b1` 不支持 `--symbol` 单股回测、不支持 `--portfolio` 组合模拟。无需 `--scan-only` 标志（默认即扫描）。`--start / --end` 限定B1信号日期范围。
 
+#### V4 ML增强（`huangbai_v4_ml`）
+
+默认直接进入组合级模拟（无需 `--portfolio`），支持 2 种运行模式：
+
+| 模式 | 触发参数 | 说明 |
+|------|----------|------|
+| 组合级模拟 | 无需额外参数（默认） | V4 B1信号 + LightGBM评分，soft模式排序优先买入高分候选，hard模式拒绝低分信号（100万/10只/每只10万） |
+| 仅扫描选股 | `--scan` 或 `--scan-only` | 全市场V4 B1扫描 + ML评分排序输出 |
+
+注意：`huangbai_v4_ml` 不支持 `--symbol` 单股回测。首次使用前需训练模型：`python train_b1v4_ml.py --train`。无模型文件时自动退化为纯V4策略。
+
 ### 完整参数表
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v4_multi` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `perfect_b1` / `perfect_b1_v2` / `perfect_b1_v2_multi` / `perfect_b1_v2_buyall` / `nxing_b1` / `jinchai_b1` |
+| `--strategy` | str | `huangbai` | 策略选择：`kdj` / `huangbai` / `huangbai_v2` / `huangbai_v3` / `huangbai_v4` / `huangbai_v4_multi` / `huangbai_v5` / `dongneng_zhuan` / `nxing_zhuan` / `jinzhuan` / `huangbai_b2` / `huangbai_b2_v2` / `perfect_b1` / `perfect_b1_v2` / `perfect_b1_v2_multi` / `perfect_b1_v2_buyall` / `nxing_b1` / `jinchai_b1` / `zstock_b1` / `zstock_b1_buyall` / `huangbai_v4_ml` |
 | `--symbol` | str[] | 无 | 股票代码，可多只（空格分隔）。不指定且无 `--scan` 时默认使用 `config.py` 中的 `DEFAULT_STOCKS` |
 | `--start` | str | `2023-01-01` | 回测/模拟起始日期 |
 | `--end` | str | `2025-12-31` | 回测/模拟结束日期 |
@@ -111,6 +123,9 @@
 | `--no-plot` | flag | - | 禁用回测结果绘图（仅指定股票回测模式有图） |
 | `--chart` | flag | - | 组合模拟完成后生成交易 K 线图（保存到 `charts/` 目录）。支持 V1/V2/V3 `--portfolio`、`dongneng_zhuan`、`nxing_zhuan`、`huangbai_b2`、`perfect_b1`、`nxing_b1` 等组合模拟模式 |
 | `--eval` | flag | - | 组合级模拟完成后生成 5 维度评测 HTML 报告（D1 最大回撤/D2 夏普卡玛/D3 月度分布/D4 参数鲁棒/D5 佣金后利润，A-F 等级制）。报告保存到 `logs/eval_{tag}_{timestamp}.html`。详见 [评测系统文档](evaluator-backtest.md) |
+| `--ml-model` | str | 无 | ML 模型文件路径（仅 `huangbai_v4_ml` 策略生效）。不指定时自动加载 `models/` 下最新模型 |
+| `--ml-filter-mode` | str | `soft` | ML 过滤模式（仅 `huangbai_v4_ml`）：`soft` 仅排序优先买入高分候选，`hard` 拒绝低分信号 |
+| `--ml-threshold` | float | `0.4` | ML 硬过滤阈值（仅 `--ml-filter-mode hard` 时生效），大盈利概率低于此值的信号被拒绝 |
 | `--update-qfq-cache` | flag | - | 批量更新前复权缓存（需要网络）。不指定 `--update-qfq-codes` 时自动扫描通达信目录获取全市场股票列表 |
 | `--update-qfq-codes` | str[] | 无 | 指定更新前复权缓存的股票代码，需配合 `--update-qfq-cache` 使用 |
 
@@ -288,6 +303,46 @@ python main.py --strategy jinchai_b1 --scan-only
 python main.py --strategy jinchai_b1 --scan-only --start 2024-01-01 --end 2025-05-01
 ```
 
+#### V4 ML增强策略
+
+```bash
+# 训练模型（首次使用前必须执行）
+python train_b1v4_ml.py --train
+
+# 仅构建训练数据（不训练）
+python train_b1v4_ml.py --build-data
+
+# 指定训练区间
+python train_b1v4_ml.py --train --start 2023-01-01 --end 2025-12-31
+
+# 查看特征重要性
+python train_b1v4_ml.py --feature-importance
+
+# 评估已有模型
+python train_b1v4_ml.py --eval
+
+# ML增强回测（默认soft模式，优先买入高分候选）
+python main.py --strategy huangbai_v4_ml
+
+# ML增强回测 + K线图 + 评测
+python main.py --strategy huangbai_v4_ml --chart --eval
+
+# 指定时间段回测
+python main.py --strategy huangbai_v4_ml --start 2024-01-01 --end 2025-06-30
+
+# 指定时间段 + K线图 + 评测
+python main.py --strategy huangbai_v4_ml --start 2024-01-01 --end 2025-06-30 --chart --eval
+
+# 硬过滤模式（拒绝低分信号）
+python main.py --strategy huangbai_v4_ml --ml-filter-mode hard --ml-threshold 0.5
+
+# 指定模型文件
+python main.py --strategy huangbai_v4_ml --ml-model models/b1v4_ml_v1.txt
+
+# 全市场扫描选股
+python main.py --strategy huangbai_v4_ml --scan-only
+```
+
 #### 评测报告
 
 ```bash
@@ -406,6 +461,20 @@ python main.py --strategy kdj --symbol 600036
 - **资金/仓位**：`NXB1_INITIAL_CASH=100万`、`NXB1_MAX_POSITIONS=10`、`NXB1_PER_POSITION=10万`，来自 `config.py`
 - **退出逻辑**：复用 PortfolioSimulator 标准六级退出（止损→跌破黄线→T+N→盈利100%→半仓持股→动量持股）
 
+#### V4 ML增强参数
+
+- **无需 `--portfolio`**：默认即组合级模拟
+- **不支持 `--symbol`**：仅支持全市场扫描或组合模拟
+- **`--stock-type`**：同黄白线系列，影响振幅阈值、中阳判断、涨停板计算
+- **资金/仓位**：复用 `PORTFOLIO_INITIAL_CASH=100万`、`PORTFOLIO_MAX_POSITIONS=10`、`PORTFOLIO_PER_POSITION=10万`，来自 `config.py`
+- **退出逻辑**：复用 PortfolioSimulator 标准六级退出（同V4）
+- **大盘MACD过滤**：同V4，空头日只卖不买
+- **ML模型**：LightGBM 三分类（大亏损/小幅波动/大盈利），取大盈利概率作为 `ml_score`
+- **ML过滤模式**：`--ml-filter-mode soft`（默认，保留所有V4 B1信号但优先买入高分候选）/ `hard`（拒绝 `ml_score < threshold` 的信号）
+- **无模型退化**：`models/` 目录下无模型文件时，策略自动退化为纯V4（`ml_score=0.5`）
+- **训练脚本**：独立的 `train_b1v4_ml.py`，不通过 `main.py` 调用
+- **特征数**：31个（动量指标8 + 距离/趋势8 + 振幅/量能8 + B1子条件7）
+
 ## 3. Relevant Code Modules
 
 - `main.py` - CLI 入口，`parse_args()` 参数定义与模式分发逻辑
@@ -429,3 +498,4 @@ python main.py --strategy kdj --symbol 600036
 - `huangbai_v4_multi` 同样不支持单股回测（STRATEGIES 字典中值为 None），需配合 `--portfolio` 使用
 - `perfect_b1_v2_multi` 同样不支持单股回测（STRATEGIES 字典中值为 None），需配合 `--portfolio` 使用
 - `perfect_b1_v2_buyall` 同样不支持单股回测（STRATEGIES 字典中值为 None），需配合 `--portfolio` 使用
+- `huangbai_v4_ml` 同样不支持单股回测（STRATEGIES 字典中值为 None）。首次使用前需运行 `python train_b1v4_ml.py --train` 训练模型，无模型时退化为纯V4策略

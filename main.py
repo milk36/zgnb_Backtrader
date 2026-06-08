@@ -106,6 +106,10 @@ from src.strategies.zstock_b1_strategy import (
 from src.strategies.zstock_b1_buyall_strategy import (
     scan_all as scan_all_zstock_b1_buyall,
 )
+from src.strategies.huangbai_b1_v4_ml_strategy import (
+    scan_all as scan_all_v4_ml,
+    preload_all_signals as preload_v4_ml,
+)
 
 STRATEGIES = {
     "kdj": KDJCrossStrategy,
@@ -128,6 +132,7 @@ STRATEGIES = {
     "jinchai_b1": None,     # 金叉B1选股：纯扫描+图表，不支持回测
     "zstock_b1": None,     # ZStock B1：StockTradebyZ 4-Filter选股+组合级模拟
     "zstock_b1_buyall": None,  # ZStock B1全仓：不限资金不限持仓，买入所有候选
+    "huangbai_v4_ml": None,  # V4 ML增强：V4 B1 + LightGBM评分过滤
 }
 
 
@@ -145,6 +150,9 @@ def parse_args():
     parser.add_argument("--portfolio", action="store_true", help="组合级模拟（正确的时间序列模拟）")
     parser.add_argument("--chart", action="store_true", help="生成交易K线图（保存到charts/目录）")
     parser.add_argument("--eval", action="store_true", help="生成策略评测HTML报告（5维度打分）")
+    parser.add_argument("--ml-model", default=None, help="ML模型文件路径（V4 ML增强策略专用）")
+    parser.add_argument("--ml-filter-mode", choices=["soft", "hard"], default=None, help="ML过滤模式: soft=仅排序, hard=过滤")
+    parser.add_argument("--ml-threshold", type=float, default=None, help="ML硬过滤阈值（大盈利概率）")
     parser.add_argument("--update-qfq-cache", action="store_true", help="批量更新前复权缓存（需要网络）")
     parser.add_argument("--update-qfq-codes", nargs="+", default=None, help="指定更新前复权缓存的股票代码")
     return parser.parse_args()
@@ -493,11 +501,9 @@ def main():
         if args.scan or args.scan_only:
             print("=" * 60)
             print("  完美B1 V2 全市场选股扫描")
-            print("  条件: V4 B1 + 11种个股模式质量过滤 + 大盘MACD多头")
+            print("  条件: V4 B1 + 11种个股模式质量过滤")
             print("=" * 60)
-            results, market_macd_ok = scan_all_pb1v2(stock_type=args.stock_type)
-            if not market_macd_ok and not results:
-                print("\n大盘MACD空头，无符合条件的股票。")
+            results, _ = scan_all_pb1v2(stock_type=args.stock_type)
             return
 
         from src.engine.portfolio_simulator import PortfolioSimulator
@@ -521,8 +527,7 @@ def main():
         print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
               f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
               f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
-        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
-        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"  大盘MACD过滤: 已禁用（完美B1不受大盘约束）")
         print(f"{'=' * 60}")
 
         sim = PortfolioSimulator(
@@ -554,11 +559,9 @@ def main():
         if args.scan or args.scan_only:
             print("=" * 60)
             print("  完美B1 V2多仓 全市场选股扫描")
-            print("  条件: V4 B1 + 11种个股模式质量过滤 + 大盘MACD多头")
+            print("  条件: V4 B1 + 11种个股模式质量过滤")
             print("=" * 60)
-            results, market_macd_ok = scan_all_pb1v2_multi(stock_type=args.stock_type)
-            if not market_macd_ok and not results:
-                print("\n大盘MACD空头，无符合条件的股票。")
+            results, _ = scan_all_pb1v2_multi(stock_type=args.stock_type)
             return
 
         from src.engine.portfolio_simulator import PortfolioSimulator
@@ -583,8 +586,7 @@ def main():
               f"不限持仓数  "
               f"每只 {PB1V2_MULTI_PER_POSITION:,.0f}  "
               f"每日最多买入 {PB1V2_MULTI_MAX_DAILY_BUYS} 只")
-        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
-        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"  大盘MACD过滤: 已禁用（完美B1不受大盘约束）")
         print(f"{'=' * 60}")
 
         sim = PortfolioSimulator(
@@ -617,11 +619,9 @@ def main():
         if args.scan or args.scan_only:
             print("=" * 60)
             print("  完美B1 V2全仓 全市场选股扫描")
-            print("  条件: V4 B1 + 11种个股模式质量过滤 + 大盘MACD多头")
+            print("  条件: V4 B1 + 11种个股模式质量过滤")
             print("=" * 60)
-            results, market_macd_ok = scan_all_pb1v2_buyall(stock_type=args.stock_type)
-            if not market_macd_ok and not results:
-                print("\n大盘MACD空头，无符合条件的股票。")
+            results, _ = scan_all_pb1v2_buyall(stock_type=args.stock_type)
             return
 
         from src.engine.portfolio_simulator import PortfolioSimulator
@@ -646,8 +646,7 @@ def main():
               f"不限持仓数  "
               f"每只 {PB1V2_BUYALL_PER_POSITION:,.0f}  "
               f"买入所有候选")
-        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
-        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"  大盘MACD过滤: 已禁用（完美B1不受大盘约束）")
         print(f"{'=' * 60}")
 
         sim = PortfolioSimulator(
@@ -1402,6 +1401,74 @@ def main():
             generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
         if args.eval:
             _run_eval(report, "[B1V4多仓]", args)
+        return
+
+    # ---- V4 ML增强策略 ----
+    if args.strategy == "huangbai_v4_ml":
+        if args.scan or args.scan_only:
+            print("=" * 55)
+            print("  V4 ML增强: 全市场选股扫描（V4 B1 + LightGBM评分）")
+            print("=" * 55)
+            scan_all_v4_ml(stock_type=args.stock_type)
+            return
+
+        from src.engine.portfolio_simulator import PortfolioSimulator
+
+        # 解析ML参数
+        ml_model_path = getattr(args, "ml_model", None)
+        ml_filter_mode = getattr(args, "ml_filter_mode", None)
+        ml_threshold = getattr(args, "ml_threshold", None)
+
+        print("=" * 55)
+        print("  V4 ML增强: V4 B1 + LightGBM 三分类评分")
+        print("  阶段1: 预加载全市场信号数据")
+        print("=" * 55)
+        all_signals, trading_days, market_macd_bullish = preload_v4_ml(
+            start=args.start, end=args.end,
+            stock_type=args.stock_type,
+            ml_model_path=ml_model_path,
+            ml_filter_mode=ml_filter_mode,
+            ml_threshold=ml_threshold)
+
+        if not all_signals or len(trading_days) == 0:
+            print("\n无有效数据，模拟终止。")
+            return
+
+        from config import ML_FILTER_MODE as _ML_FILTER_MODE
+        filter_mode = ml_filter_mode or _ML_FILTER_MODE
+        print(f"\n{'=' * 55}")
+        print(f"  阶段2: V4 ML增强组合级模拟 ({len(trading_days)} 个交易日)")
+        print(f"  区间: {args.start} ~ {args.end}")
+        print(f"  资金: {PORTFOLIO_INITIAL_CASH:,.0f}  "
+              f"最多 {PORTFOLIO_MAX_POSITIONS} 只  "
+              f"每只 {PORTFOLIO_PER_POSITION:,.0f}")
+        print(f"  ML过滤模式: {filter_mode}")
+        macd_status = "已启用" if market_macd_bullish is not None else "不可用(跳过)"
+        print(f"  大盘MACD过滤: {macd_status}")
+        print(f"{'=' * 55}")
+
+        sim = PortfolioSimulator(
+            all_signals=all_signals,
+            trading_days=trading_days,
+            initial_cash=PORTFOLIO_INITIAL_CASH,
+            max_positions=PORTFOLIO_MAX_POSITIONS,
+            per_position_cash=PORTFOLIO_PER_POSITION,
+            commission=COMMISSION,
+            stock_type=args.stock_type,
+            log_dir=LOG_DIR,
+            market_macd_bullish=market_macd_bullish,
+            strategy_tag="[B1V4-ML]",
+            cli_args=args)
+        sim.run()
+        report = sim.report()
+        PortfolioSimulator.print_report(report, log_file=sim._log_file,
+                                        strategy_tag="[B1V4-ML]")
+
+        if args.chart:
+            from src.charting import generate_charts
+            generate_charts(report["trade_list"], sim._all_signals, sub_chart="brick")
+        if args.eval:
+            _run_eval(report, "[B1V4-ML]", args)
         return
 
     # ---- 指定股票回测 ----

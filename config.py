@@ -167,3 +167,11 @@ ZSTOCK_AI_SCORE_WATCH = 3.2            # WATCH 阈值
 ZSTOCK_BUYALL_INITIAL_CASH = 1_000_000_000  # 10亿（不限制）
 ZSTOCK_BUYALL_PER_POSITION = 100_000        # 每只10万
 ZSTOCK_BUYALL_MAX_DAILY_BUYS = 9999         # 不限制每日买入数量
+
+# ML 增强策略参数
+ML_MODEL_DIR = "models"                    # 模型文件目录
+ML_FILTER_MODE = "soft"                    # "soft"（仅排序）| "hard"（过滤）
+ML_SCORE_THRESHOLD = 0.4                   # 硬过滤模式阈值（大盈利概率>=此值才通过）
+ML_LABEL_WIN = 5.0                         # 大盈利标签阈值(%)
+ML_LABEL_LOSS = -5.0                       # 大亏损标签阈值(%)
+ML_TRAIN_TEST_SPLIT = 0.15                 # 验证集/测试集各占比例

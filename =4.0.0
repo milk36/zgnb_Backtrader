@@ -1,0 +1,8 @@
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple
+Collecting lightgbm
+  Downloading https://mirrors.aliyun.com/pypi/packages/5e/23/f8b28ca248bb629b9e08f877dd2965d1994e1674a03d67cd10c5246da248/lightgbm-4.6.0-py3-none-win_amd64.whl (1.5 MB)
+     ---------------------------------------- 1.5/1.5 MB 1.8 MB/s eta 0:00:00
+Requirement already satisfied: numpy>=1.17.0 in d:\tools\anaconda\lib\site-packages (from lightgbm) (1.26.4)
+Requirement already satisfied: scipy in d:\tools\anaconda\lib\site-packages (from lightgbm) (1.14.1)
+Installing collected packages: lightgbm
+Successfully installed lightgbm-4.6.0
