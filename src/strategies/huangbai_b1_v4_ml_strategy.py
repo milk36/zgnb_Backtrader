@@ -93,10 +93,11 @@ def _compute_all_bar_signals(C, H, L, O, V, dates, params, capital_shares=None):
 
     # 步骤4: 在所有B1 bar上预测
     n = len(C)
-    ml_score = np.zeros(n, dtype=float)
     b1_mask = signals["b1"]
     if np.any(b1_mask):
-        ml_score[b1_mask] = predictor.predict_batch(feature_arrays, b1_mask)
+        ml_score = predictor.predict_batch(feature_arrays, b1_mask)
+    else:
+        ml_score = np.zeros(n, dtype=float)
 
     signals["ml_score"] = ml_score
 
