@@ -44,11 +44,25 @@
    - 每日：检查持仓卖出条件（止损→巨量阴线清仓→T+N→盈利100%清仓→半仓持股模式→涨停卖半→中阳卖1/3(需当日上涨)）
    - 记录每日权益曲线
 
+#### 半仓试水+次日确认加仓
+
+所有B1策略的买入逻辑从"一次性全仓买入"改为两阶段：
+
+1. **首次半仓买入**：`_check_entries()` 用 `per_position_cash * 0.5` 计算可买股数（100股整手），Position 创建时 `pending_add=True`
+2. **次日确认加仓**：`_check_add_positions()` 在买入次日（`days_since_buy == 1`）判断：
+   - 收阳线（收盘>开盘）→ 以收盘价加仓另一半（`per_position_cash * 0.5`），更新 `size`/`initial_size`，记录 `cost_adjustment`
+   - 未收阳线 → 不加仓，保持半仓等止损
+   - 超过1天未判断（停牌等）→ 放弃加仓，`pending_add=False`
+3. **止损价不变**：加仓后 `stop_loss` 保持首次买入时的值
+4. **成本调整**：`cost_adjustment = (加仓股数 * 加仓价 - 加仓股数 * 首次价) * (1+佣金)`，所有 `total_cost` 计算均加入此值
+
+执行顺序：`卖出检查 → 加仓检查 → 买入检查`（卖出后再决定加仓，避免加仓后即被止损）。
+
 #### 仓位管理
 
 - 初始资金 100 万，最多 10 只，每只 10 万（V4多仓：100万/不限仓位数/每只10万）
 - `max_daily_buys` 参数（默认 1）：每日最多买入候选中的前 N 只。`_check_entries()` 循环遍历排序后的候选列表，逐只买入直到达到 `max_daily_buys` 或 `max_positions` 或现金不足
-- 买入股数按 100 股整手计算：`int(per_position_cash / (price * (1+commission)) / 100) * 100`
+- 首次买入股数按半仓计算：`int(per_position_cash * 0.5 / (price * (1+commission)) / 100) * 100`
 - T+N 按交易日计算（通过 trading_days 索引差值）
 - Position 维护 `partial_proceeds` 累计部分卖出回款，用于摊薄成本价计算
 
@@ -93,7 +107,8 @@
 ## 3. Relevant Code Modules
 
 - `src/engine/backtester.py` - Backtester 单股回测类
-- `src/engine/portfolio_simulator.py` - PortfolioSimulator 组合模拟器（Position 数据类，`max_daily_buys` 参数）
+- `src/engine/portfolio_simulator.py` - PortfolioSimulator 组合模拟器（Position 数据类含 `pending_add`/`add_buy_price`/`cost_adjustment`，`_check_add_positions` 加仓方法）
+- `src/engine/nxing_b1_simulator.py` - NxingB1Simulator 组合模拟器（同步半仓试水+次日确认加仓逻辑）
 - `config.py` - `INITIAL_CASH`, `COMMISSION`, `PORTFOLIO_INITIAL_CASH`, `PORTFOLIO_MAX_POSITIONS`, `PORTFOLIO_PER_POSITION`, `V4_MULTI_*` 系列参数
 
 ## 4. Attention
@@ -107,3 +122,5 @@
 - PortfolioSimulator 的 `_find_bar_index()` 使用 `searchsorted` 查找最近的前一个交易日，处理停牌场景
 - 清仓收益使用总回款（含部分卖出累计）vs 总成本计算，非最终卖出价 vs 买入价
 - `market_macd_bullish` 长度必须与 `trading_days` 一致，否则抛出 `ValueError`
+- **半仓试水**：Position 新增 `pending_add`/`add_buy_price`/`cost_adjustment` 三个字段，所有 `total_cost` 计算必须加入 `cost_adjustment`，否则收益计算错误
+- **半仓试水同步**：`portfolio_simulator.py` 和 `nxing_b1_simulator.py` 的加仓逻辑完全一致，修改一处必须同步另一处

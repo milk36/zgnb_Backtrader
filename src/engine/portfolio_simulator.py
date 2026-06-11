@@ -35,6 +35,10 @@ class Position:
         "profit_80pct_done",
         # 目标价止盈
         "wave_high_target", "target_tp_done",
+        # 半仓试水+次日确认加仓
+        "pending_add",       # 是否待次日确认加仓
+        "add_buy_price",     # 加仓买入价
+        "cost_adjustment",   # 加仓带来的成本调整额
     )
 
     def __init__(self, code, buy_date, buy_price, buy_low,
@@ -74,6 +78,10 @@ class Position:
         # 目标价止盈
         self.wave_high_target = 0.0
         self.target_tp_done = False
+        # 半仓试水+次日确认加仓
+        self.pending_add = True
+        self.add_buy_price = 0.0
+        self.cost_adjustment = 0.0
 
 
 class PortfolioSimulator:
@@ -232,6 +240,9 @@ class PortfolioSimulator:
             # 每日卖出检查
             self._check_exits(td)
 
+            # 每日加仓检查（卖出后再决定加仓，避免加仓后即被止损）
+            self._check_add_positions(td)
+
             # 每日买入检查（最后一天只卖不买，避免T+0）
             if td != self._trading_days[-1]:
                 self._check_entries(td)
@@ -274,10 +285,10 @@ class PortfolioSimulator:
                 pass
 
     def _check_entries(self, date):
-        """从观察池中筛选 gc_ok + b1 的候选，买入缩量最优的N只"""
+        """从观察池中筛选 gc_ok + b1 的候选，半仓买入缩量最优的N只"""
         if len(self._positions) >= self._max_positions:
             return
-        if self._cash < self._per_position_cash * 0.5:
+        if self._cash < self._per_position_cash * 0.25:
             return
 
         # V2: 大盘MACD过滤 — 空头时只卖不买
@@ -343,7 +354,7 @@ class PortfolioSimulator:
         for code, score, avg_amt, cs, b2p, idx, sig in candidates:
             if len(self._positions) >= self._max_positions:
                 break
-            if self._cash < self._per_position_cash * 0.5:
+            if self._cash < self._per_position_cash * 0.25:
                 break
 
             # B2: T+1开盘买入
@@ -354,9 +365,10 @@ class PortfolioSimulator:
             if price <= 0:
                 continue
 
-            # 计算可买股数（100股整手）
+            # 计算可买股数（100股整手）— 半仓买入
             buy_cost = price * (1 + self._commission)
-            shares = int(self._per_position_cash / buy_cost / 100) * 100
+            half_cash = self._per_position_cash * 0.5
+            shares = int(half_cash / buy_cost / 100) * 100
             if shares <= 0:
                 continue
 
@@ -413,7 +425,7 @@ class PortfolioSimulator:
                 if td_idx is not None:
                     macd_tag = f"  大盘={'多头' if self._market_macd_bullish[td_idx] else '空头'}"
 
-            self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 买入 {code}  "
+            self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 半仓买入 {code}  "
                       f"价格={price:.2f}  数量={shares}  止损={sl:.2f}  "
                       f"缩量={score:.3f}{macd_tag}  "
                       f"持仓={len(self._positions)}/{self._max_positions}  "
@@ -422,6 +434,84 @@ class PortfolioSimulator:
             bought_today += 1
             if bought_today >= self._max_daily_buys:
                 break
+
+    def _check_add_positions(self, date):
+        """次日确认加仓：收阳线(收盘>开盘)则加仓另一半，否则保持半仓"""
+        for code, pos in list(self._positions.items()):
+            if not pos.pending_add:
+                continue
+
+            sig = self._all_signals.get(code)
+            if sig is None:
+                continue
+            idx = self._find_bar_index(code, date)
+            if idx is None:
+                continue
+
+            # 只在买入次日判断（days_since_buy == 1）
+            buy_td_idx = self._td_index.get(pos.buy_date)
+            cur_td_idx = self._td_index.get(date)
+            if buy_td_idx is None or cur_td_idx is None:
+                continue
+            days_since_buy = cur_td_idx - buy_td_idx
+            if days_since_buy < 1:
+                continue
+            if days_since_buy > 1:
+                # 超过1天仍未判断（停牌等），放弃加仓
+                pos.pending_add = False
+                continue
+
+            try:
+                close_val = sig["close"][idx]
+                open_val = sig["open"][idx]
+            except (IndexError, TypeError):
+                pos.pending_add = False
+                continue
+
+            if close_val > open_val:
+                # 收阳线 → 加仓另一半
+                price = close_val
+                if price <= 0:
+                    pos.pending_add = False
+                    continue
+
+                buy_cost = price * (1 + self._commission)
+                half_cash = self._per_position_cash * 0.5
+                add_shares = int(half_cash / buy_cost / 100) * 100
+                if add_shares <= 0:
+                    pos.pending_add = False
+                    continue
+
+                total_cost = add_shares * price * (1 + self._commission)
+                if total_cost > self._cash:
+                    add_shares = int(self._cash / buy_cost / 100) * 100
+                    if add_shares <= 0:
+                        pos.pending_add = False
+                        continue
+                    total_cost = add_shares * price * (1 + self._commission)
+
+                # 记录加仓信息
+                pos.add_buy_price = price
+                old_initial = pos.initial_size
+                # 成本调整：实际加仓成本 - 按首次价算的成本
+                pos.cost_adjustment = (add_shares * price - add_shares * pos.buy_price) * (1 + self._commission)
+                pos.size += add_shares
+                pos.initial_size = old_initial + add_shares
+                self._cash -= total_cost
+
+                self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 确认加仓 {code}  "
+                          f"价格={price:.2f}  数量={add_shares}  "
+                          f"原持仓={old_initial}→总持仓={pos.size}  "
+                          f"止损={pos.stop_loss:.2f}(不变)  "
+                          f"持仓={len(self._positions)}/{self._max_positions}  "
+                          f"现金={self._cash:,.0f}")
+            else:
+                # 未收阳线 → 不加仓，保持半仓等止损
+                self._log(f"  [{date.strftime('%Y-%m-%d')}] {self._strategy_tag} 未加仓 {code}  "
+                          f"收盘={close_val:.2f}  开盘={open_val:.2f}  未收阳线，保持半仓{pos.size}股  "
+                          f"止损={pos.stop_loss:.2f}")
+
+            pos.pending_add = False
 
     def _check_exits(self, date):
         """检查所有持仓的卖出条件"""
@@ -463,7 +553,7 @@ class PortfolioSimulator:
             days_held = bars_held
 
             # 计算摊薄成本价（扣除部分卖出回款后的真实成本）
-            total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+            total_cost = pos.initial_size * pos.buy_price * (1 + self._commission) + pos.cost_adjustment
             remaining_cost = total_cost - pos.partial_proceeds
             avg_cost = remaining_cost / pos.size if pos.size > 0 else pos.buy_price
 
@@ -553,7 +643,7 @@ class PortfolioSimulator:
                 continue
 
             # 3. 盈利100%后连跌2天清仓（基于实际总收益，含部分卖出回款）
-            total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+            total_cost = pos.initial_size * pos.buy_price * (1 + self._commission) + pos.cost_adjustment
             current_value = pos.size * price * (1 - self._commission)
             total_proceeds = pos.partial_proceeds + current_value
             total_pnl_pct = (total_proceeds - total_cost) / total_cost * 100
@@ -988,7 +1078,7 @@ class PortfolioSimulator:
         """全部卖出"""
         proceeds = pos.size * price * (1 - self._commission)
         total_proceeds = pos.partial_proceeds + proceeds
-        total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+        total_cost = pos.initial_size * pos.buy_price * (1 + self._commission) + pos.cost_adjustment
         pnl = (total_proceeds - total_cost) / total_cost * 100
         pnl_amount = total_proceeds - total_cost
         # 剩余持仓的摊薄成本价
@@ -1021,7 +1111,7 @@ class PortfolioSimulator:
     def _sell_partial(self, code, pos, sell_size, price, date, reason):
         """部分卖出"""
         proceeds = sell_size * price * (1 - self._commission)
-        total_cost = pos.initial_size * pos.buy_price * (1 + self._commission)
+        total_cost = pos.initial_size * pos.buy_price * (1 + self._commission) + pos.cost_adjustment
         pnl = (price - pos.buy_price) / pos.buy_price * 100
         self._cash += proceeds
         pos.partial_proceeds += proceeds
